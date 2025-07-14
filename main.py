@@ -142,7 +142,7 @@ class LiquidAIApp(QWidget):
     def on_generation_complete(self, response):
         cursor = self.chat_area.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
-        cursor.select(cursor.LineUnderCursor)
+        cursor.select(cursor.SelectionType.LineUnderCursor)
         cursor.removeSelectedText()
         cursor.deletePreviousChar()
         self.chat_area.setTextCursor(cursor)
