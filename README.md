@@ -1,3 +1,5 @@
+                                ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 # Application de Chat LiquidAI
 
 Une application de bureau simple pour discuter avec les modèles d'IA de LiquidAI.
@@ -25,6 +27,3 @@ Une application de bureau simple pour discuter avec les modèles d'IA de LiquidA
 -   `run.bat`: Lance l'application.
 -   `main.py`: Le code source de l'application.
 -   `requirements.txt`: Liste des dépendances Python.
-
--   ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-
