@@ -1,5 +1,3 @@
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-
 # Application de Chat LiquidAI
 
 Une application de bureau simple pour discuter avec les modèles d'IA de LiquidAI.

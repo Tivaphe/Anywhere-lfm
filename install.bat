@@ -51,6 +51,11 @@ pip install torch PyQt6 accelerate
 echo Installation de la dernière version de Transformers depuis GitHub...
 pip install git+https://github.com/huggingface/transformers.git@main
 
+echo Installation de Llama.cpp...
+set CMAKE_ARGS="-DLLAMA_CUBLAS=on"
+set FORCE_CMAKE=1
+pip install llama-cpp-python --no-cache-dir
+
 echo.
 echo #################################################################
 echo #                                                               #
