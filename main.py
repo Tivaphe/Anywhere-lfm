@@ -2,24 +2,16 @@ import sys
 import os
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QLineEdit, QPushButton, QComboBox, QLabel,
-                             QHBoxLayout, QMessageBox)
+                             QHBoxLayout)
 from PyQt6.QtCore import QThread, pyqtSignal
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 import torch
 
 from settings import SettingsWindow
 
-# --- Gestion de l'importation de Llama.cpp ---
-try:
-    from llama_cpp import Llama
-    LLAMA_CPP_AVAILABLE = True
-except ImportError:
-    LLAMA_CPP_AVAILABLE = False
-    Llama = None # Pour éviter les erreurs de type plus tard
-
 # --- Workers pour le chargement et la génération en arrière-plan ---
 
-class TransformersModelWorker(QThread):
+class ModelWorker(QThread):
     model_loaded = pyqtSignal(object, object)
     error = pyqtSignal(str)
 
@@ -40,22 +32,6 @@ class TransformersModelWorker(QThread):
         except Exception as e:
             self.error.emit(f"Erreur Transformers : {e}")
 
-if LLAMA_CPP_AVAILABLE:
-    class GGUFModelWorker(QThread):
-        model_loaded = pyqtSignal(object, object)
-        error = pyqtSignal(str)
-
-        def __init__(self, model_path):
-            super().__init__()
-            self.model_path = model_path
-
-        def run(self):
-            try:
-                model = Llama(model_path=self.model_path, n_ctx=2048, n_gpu_layers=-1)
-                self.model_loaded.emit(model, None)
-            except Exception as e:
-                self.error.emit(f"Erreur Llama.cpp : {e}")
-
 class GenerationWorker(QThread):
     generation_complete = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -69,32 +45,22 @@ class GenerationWorker(QThread):
 
     def run(self):
         try:
-            result = ""
-            if isinstance(self.model, PreTrainedModel):
-                # Inférence avec Transformers
-                input_ids = self.tokenizer.apply_chat_template(
-                    self.conversation_history, add_generation_prompt=True, return_tensors="pt"
-                ).to(self.model.device)
+            input_ids = self.tokenizer.apply_chat_template(
+                self.conversation_history, add_generation_prompt=True, return_tensors="pt"
+            ).to(self.model.device)
+
+            with torch.no_grad():
                 outputs = self.model.generate(
-                    input_ids, max_new_tokens=512, do_sample=True,
+                    input_ids,
+                    max_new_tokens=512,
+                    do_sample=True,
                     temperature=self.settings["temperature"],
                     top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
                     repetition_penalty=self.settings["repetition_penalty"]
                 )
-                new_tokens = outputs[0][input_ids.shape[-1]:]
-                result = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-            elif LLAMA_CPP_AVAILABLE and isinstance(self.model, Llama):
-                # Inférence avec Llama.cpp
-                completion = self.model.create_chat_completion(
-                    messages=self.conversation_history,
-                    temperature=self.settings["temperature"],
-                    top_p=self.settings["min_p"],
-                    repeat_penalty=self.settings["repetition_penalty"],
-                    stream=False
-                )
-                result = completion['choices'][0]['message']['content']
-
+            new_tokens = outputs[0][input_ids.shape[-1]:]
+            result = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
             self.generation_complete.emit(result)
         except Exception as e:
             self.error.emit(f"Erreur de génération : {e}")
@@ -119,8 +85,6 @@ class LiquidAIApp(QWidget):
         self.init_ui()
         self.check_device()
         self.refresh_model_list()
-        if not LLAMA_CPP_AVAILABLE:
-            self.chat_area.append("<font color='orange'>AVERTISSEMENT : Llama.cpp non installé. Le chargement des modèles GGUF est désactivé.</font>")
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -131,13 +95,10 @@ class LiquidAIApp(QWidget):
         model_controls_layout = QHBoxLayout()
         self.model_selector = QComboBox()
         self.model_selector.currentTextChanged.connect(self.on_model_change)
-        refresh_button = QPushButton("Actualiser")
-        refresh_button.clicked.connect(self.refresh_model_list)
         settings_button = QPushButton("Paramètres")
         settings_button.clicked.connect(self.open_settings)
         model_controls_layout.addWidget(QLabel("Modèle:"))
         model_controls_layout.addWidget(self.model_selector)
-        model_controls_layout.addWidget(refresh_button)
         model_controls_layout.addWidget(settings_button)
         layout.addLayout(model_controls_layout)
 
@@ -161,14 +122,8 @@ class LiquidAIApp(QWidget):
         self.model_selector.clear()
 
         huggingface_models = ["LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B"]
-        self.model_selector.addItems([f"[HF] {name}" for name in huggingface_models])
+        self.model_selector.addItems(huggingface_models)
 
-        if LLAMA_CPP_AVAILABLE:
-            models_dir = "models"
-            if os.path.exists(models_dir):
-                for filename in os.listdir(models_dir):
-                    if filename.lower().endswith(".gguf"):
-                        self.model_selector.addItem(f"[Local] {filename}")
         self.model_selector.blockSignals(False)
         self.on_model_change(self.model_selector.currentText())
 
@@ -189,19 +144,7 @@ class LiquidAIApp(QWidget):
     def load_model(self, model_identifier):
         self.set_ui_enabled(False)
         self.chat_area.append(f"<i>Chargement du modèle {model_identifier}...</i>")
-
-        if model_identifier.startswith("[HF]"):
-            self.worker = TransformersModelWorker(model_identifier.replace("[HF] ", ""))
-        elif model_identifier.startswith("[Local]"):
-            if not LLAMA_CPP_AVAILABLE:
-                self.on_error("Llama.cpp n'est pas installé. Impossible de charger un modèle GGUF.")
-                return
-            model_path = os.path.join("models", model_identifier.replace("[Local] ", ""))
-            self.worker = GGUFModelWorker(model_path)
-        else:
-            self.on_error("Type de modèle non reconnu.")
-            return
-
+        self.worker = ModelWorker(model_identifier)
         self.worker.model_loaded.connect(self.on_model_loaded)
         self.worker.error.connect(self.on_error)
         self.worker.start()
@@ -209,7 +152,7 @@ class LiquidAIApp(QWidget):
     def on_model_loaded(self, model, tokenizer):
         self.model = model
         self.tokenizer = tokenizer
-        model_name = getattr(self.model, 'config', {}).get('_name_or_path', self.model_selector.currentText())
+        model_name = getattr(model, 'config', {}).get('_name_or_path', self.model_selector.currentText())
         self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
         self.set_ui_enabled(True)
 
@@ -256,13 +199,6 @@ class LiquidAIApp(QWidget):
         self.model_selector.setEnabled(enabled)
 
 if __name__ == "__main__":
-    if LLAMA_CPP_AVAILABLE:
-        from llama_cpp.llama import K_QUANTS
-        K_QUANTS.update({
-            "IQ2_XXS": 17, "IQ2_XS": 18, "IQ2_S": 19, "IQ2_M": 20, "IQ1_S": 21,
-            "IQ1_M": 22, "IQ3_XXS": 23, "IQ3_S": 24, "IQ3_M": 25, "IQ4_XS": 26, "IQ4_NL": 27
-        })
-
     app = QApplication(sys.argv)
     window = LiquidAIApp()
     window.show()

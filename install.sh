@@ -21,54 +21,11 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 
-# Mettre à jour pip et installer les dépendances de base
+# Mettre à jour pip et installer les dépendances
 pip install --upgrade pip
-echo "Installation des dépendances de base (PyQt, Transformers, etc.)..."
+echo "Installation des dépendances..."
 pip install torch PyQt6 accelerate
 pip install "transformers @ git+https://github.com/huggingface/transformers.git@main"
-
-# --- Installation de Llama.cpp ---
-echo
-echo "Tentative d'installation de Llama.cpp (pour les modèles GGUF)..."
-
-# Fonction pour gérer l'échec
-handle_llama_failure() {
-    echo
-    echo "#################################################################"
-    echo "#                                                               #"
-    echo "#   AVERTISSEMENT : L'installation de Llama.cpp a échoué.       #"
-    echo "#                                                               #"
-    echo "#################################################################"
-    echo
-    echo "Cela signifie que vous ne pourrez PAS utiliser les modèles locaux .gguf."
-    echo "L'application fonctionnera toujours avec les modèles Hugging Face ([HF])."
-    echo
-    echo "Pour résoudre ce problème, assurez-vous d'avoir un compilateur C++ installé."
-    echo "- Sur Debian/Ubuntu: sudo apt-get install build-essential"
-    echo "- Sur macOS: xcode-select --install"
-    echo
-}
-
-# Tenter l'installation
-pip install llama-cpp-python --no-cache-dir
-if [ $? -ne 0 ]; then
-    echo "L'installation simple a échoué. Tentative de compilation avec détection du matériel..."
-    UNAME_S=$(uname -s)
-    if [ "$UNAME_S" == "Darwin" ]; then
-        echo "Système macOS détecté. Compilation avec le support Metal..."
-        CMAKE_ARGS="-DLLAMA_METAL=on" pip install --force-reinstall --no-cache-dir llama-cpp-python || handle_llama_failure
-    elif [ "$UNAME_S" == "Linux" ]; then
-        if command -v nvidia-smi &> /dev/null; then
-            echo "GPU NVIDIA détecté. Compilation avec le support CUDA..."
-            CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install --force-reinstall --no-cache-dir llama-cpp-python || handle_llama_failure
-        else
-            echo "Pas de GPU NVIDIA détecté. Compilation pour CPU..."
-            pip install --force-reinstall --no-cache-dir llama-cpp-python || handle_llama_failure
-        fi
-    else
-        handle_llama_failure
-    fi
-fi
 
 echo
 echo "#################################################################"
