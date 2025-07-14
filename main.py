@@ -3,8 +3,28 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QLineEdit, QPushButton, QComboBox, QLabel,
                              QHBoxLayout)
 from PyQt6.QtCore import QThread, pyqtSignal
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, PretrainedConfig, PreTrainedModel
+from transformers.models.auto.auto_factory import _BaseAutoModelClass
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 import torch
+
+# Définition de l'architecture LFM2 (simplifiée)
+class LFM2Config(PretrainedConfig):
+    model_type = "lfm2"
+
+class LFM2Model(PreTrainedModel):
+    config_class = LFM2Config
+    def __init__(self, config):
+        super().__init__(config)
+        # Ici, on aurait normalement les couches du modèle (embeddings, décodeurs, etc.)
+        # Pour le chargement, une définition minimale suffit.
+        self.dummy_layer = torch.nn.Linear(1, 1)
+
+# Enregistrement de l'architecture LFM2
+CONFIG_MAPPING.register("lfm2", LFM2Config)
+if isinstance(AutoModelForCausalLM, _BaseAutoModelClass):
+    AutoModelForCausalLM.register(LFM2Config, LFM2Model)
+
 
 class ModelWorker(QThread):
     model_loaded = pyqtSignal(object, object)
@@ -16,8 +36,8 @@ class ModelWorker(QThread):
 
     def run(self):
         try:
-            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            model = AutoModelForCausalLM.from_pretrained(self.model_name)
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True)
             self.model_loaded.emit(tokenizer, model)
         except Exception as e:
             self.error.emit(str(e))
