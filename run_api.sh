@@ -3,5 +3,5 @@
 # Activer l'environnement virtuel
 source venv/bin/activate
 
-# Lancer l'application
-python3 main.py
+# Lancer le serveur API
+python3 api.py
