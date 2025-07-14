@@ -17,27 +17,23 @@ Une application de bureau simple pour discuter avec les modèles d'IA de LiquidA
 
 -   **Python 3.8+**
 -   **Git**
--   Un **compilateur C++** :
-    -   **Windows** : Les "Build Tools for Visual Studio" sont généralement requis.
-    -   **macOS** : Les "Command Line Tools for Xcode" sont nécessaires (`xcode-select --install`).
-    -   **Linux** : Un paquet comme `build-essential` (sur Debian/Ubuntu) est nécessaire.
 
 ### Instructions par Système d'Exploitation
+
+L'installation est gérée par des scripts qui tentent de s'adapter à votre système.
 
 #### Pour Windows
 
 1.  **Exécutez `install.bat`**
-    -   Double-cliquez sur le fichier `install.bat`.
-    -   Une fenêtre de terminal s'ouvrira et installera tout ce qui est nécessaire. Cela peut prendre un certain temps.
-    -   Si l'installation de `llama-cpp-python` échoue, assurez-vous d'avoir les "Build Tools for Visual Studio" installées.
-    -   Attendez que le message "Installation terminée avec succès!" apparaisse, puis appuyez sur n'importe quelle touche pour fermer la fenêtre.
+    -   Double-cliquez sur le fichier. Le script installera toutes les dépendances nécessaires.
+    -   Il tentera d'installer `llama-cpp-python` pour le support des modèles GGUF.
 
 2.  **Lancez l'application**
     -   Double-cliquez sur `run.bat`.
 
 #### Pour macOS et Linux
 
-1.  **Rendez les scripts exécutables** (si nécessaire) :
+1.  **Rendez les scripts exécutables** (une seule fois) :
     ```bash
     chmod +x install.sh run.sh
     ```
@@ -46,24 +42,37 @@ Une application de bureau simple pour discuter avec les modèles d'IA de LiquidA
     ```bash
     ./install.sh
     ```
-    -   Le script détectera votre système pour tenter une compilation optimisée de `llama-cpp-python` (Metal pour macOS, CUDA pour Linux avec GPU NVIDIA).
-    -   Suivez les instructions si des dépendances sont manquantes.
 
 3.  **Lancez l'application** :
     ```bash
     ./run.sh
     ```
 
+### En cas d'échec de l'installation de `llama-cpp-python`
+
+`llama-cpp-python` est la seule dépendance complexe car elle nécessite une compilation.
+
+-   **Que se passe-t-il si l'installation échoue ?**
+    -   Le script d'installation affichera un **AVERTISSEMENT**, mais **ne s'arrêtera pas**.
+    -   **L'application sera toujours fonctionnelle** pour les modèles standards de Hugging Face (ceux marqués `[HF]`).
+    -   Seule la possibilité de charger des modèles locaux `.gguf` sera désactivée.
+
+-   **Comment résoudre le problème ?**
+    -   La cause la plus fréquente est l'absence d'un compilateur C++. Assurez-vous d'en avoir un :
+        -   **Windows** : Installez les **Build Tools for Visual Studio** (via le "Visual Studio Installer", cochez la charge de travail "Développement desktop en C++").
+        -   **macOS** : Installez les **Command Line Tools for Xcode** en tapant `xcode-select --install` dans un terminal.
+        -   **Linux** : Installez `build-essential` (ex: `sudo apt-get install build-essential` sur Debian/Ubuntu).
+    -   Après avoir installé le compilateur, relancez simplement le script `install.bat` ou `install.sh`.
+
 ## Comment l'utiliser
 
 1.  **(Optionnel) Ajoutez vos propres modèles**
-    -   Placez vos fichiers de modèle `.gguf` dans le dossier `models` qui a été créé à la racine du projet.
+    -   Placez vos fichiers de modèle `.gguf` dans le dossier `models`.
 
-2.  **Lancez l'application**
-    -   Utilisez `run.bat` ou `./run.sh`.
+2.  **Lancez l'application** (`run.bat` ou `./run.sh`).
 
 3.  **Utilisation de l'interface**
-    -   **Actualiser** : Cliquez sur le bouton "Actualiser" pour scanner le dossier `models` et mettre à jour la liste des modèles disponibles.
-    -   **Sélectionnez un modèle** : Choisissez un modèle dans la liste. `[HF]` indique un modèle qui sera téléchargé depuis Hugging Face, et `[Local]` un modèle de votre dossier `models`.
-    -   **Paramètres** : Cliquez sur "Paramètres" pour ajuster le prompt système, la température, et d'autres options de génération.
-    -   **Discutez** : Tapez votre message et appuyez sur Entrée !
+    -   **Actualiser** : Scanne le dossier `models` et met à jour la liste des modèles.
+    -   **Sélectionnez un modèle** : `[HF]` = Hugging Face (téléchargé), `[Local]` = votre fichier GGUF.
+    -   **Paramètres** : Ouvre une fenêtre pour régler le prompt système, la température, etc.
+    -   **Discutez** !
