@@ -1,0 +1,6 @@
+transformers
+torch
+ipywidgets
+flask
+fastapi
+uvicorn
