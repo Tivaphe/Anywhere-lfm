@@ -70,7 +70,15 @@ class LiquidAIApp(QWidget):
         self.setGeometry(100, 100, 700, 500)
         self.conversation_history = []
         self.init_ui()
+        self.check_device()
         self.load_model(self.model_selector.currentText())
+
+    def check_device(self):
+        if torch.cuda.is_available():
+            device = f"GPU: {torch.cuda.get_device_name(0)}"
+        else:
+            device = "CPU"
+        self.chat_area.append(f"<i>Utilisation de l'appareil : {device}</i>")
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -83,10 +91,21 @@ class LiquidAIApp(QWidget):
         model_label = QLabel("Modèle:")
         self.model_selector = QComboBox()
         self.model_selector.addItems(["LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B"])
-        self.model_selector.currentTextChanged.connect(self.on_model_change)
         model_layout.addWidget(model_label)
         model_layout.addWidget(self.model_selector)
         layout.addLayout(model_layout)
+
+        # Prompt Système
+        prompt_layout = QHBoxLayout()
+        prompt_label = QLabel("Prompt Système:")
+        self.system_prompt_field = QLineEdit()
+        self.system_prompt_field.setText("You are a helpful assistant trained by Liquid AI.")
+        prompt_layout.addWidget(prompt_label)
+        prompt_layout.addWidget(self.system_prompt_field)
+        layout.addLayout(prompt_layout)
+
+        # Connecter le changement de modèle après la création de tous les widgets
+        self.model_selector.currentTextChanged.connect(self.on_model_change)
 
         input_layout = QHBoxLayout()
         self.input_field = QLineEdit()
@@ -118,8 +137,10 @@ class LiquidAIApp(QWidget):
         self.model = model
         self.chat_area.append(f"<i>Modèle {self.model.config._name_or_path} chargé.</i>")
         self.set_ui_enabled(True)
-        # Ajout du prompt système au début de la conversation
-        self.conversation_history.append({"role": "system", "content": "You are a helpful assistant trained by Liquid AI."})
+        # Ajout du prompt système personnalisé au début de la conversation
+        system_prompt = self.system_prompt_field.text().strip()
+        if system_prompt:
+            self.conversation_history.append({"role": "system", "content": system_prompt})
 
 
     def send_message(self):
