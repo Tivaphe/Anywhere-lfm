@@ -13,10 +13,15 @@ Une application de bureau simple pour discuter avec les modèles d'IA de LiquidA
 
 ## Installation
 
-### Prérequis
+### Prérequis Essentiels
 
 -   **Python 3.8+**
 -   **Git**
+-   **(Windows Uniquement) Support des chemins longs activé :** L'installation de `transformers` depuis la source peut échouer sur Windows si cette option n'est pas activée.
+    1.  Ouvrez l'Éditeur de Stratégie de Groupe : `Win + R`, tapez `gpedit.msc`.
+    2.  Naviguez vers `Configuration ordinateur > Modèles d'administration > Système > Système de fichiers`.
+    3.  Double-cliquez sur `Activer la prise en charge des chemins d'accès longs Win32` et mettez-le sur `Activé`.
+    4.  Redémarrez votre ordinateur.
 
 ### Instructions par Système d'Exploitation
 
