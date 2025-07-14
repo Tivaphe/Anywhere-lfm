@@ -6,8 +6,8 @@ echo #                                                               #
 echo #################################################################
 echo.
 
-REM Verifier les prerequis importants
-echo Verification des prerequis...
+REM Vérifier les prérequis importants
+echo Vérification des prérequis...
 python --version >nul 2>nul
 if %errorlevel% neq 0 (
     echo Python n'est pas installé ou n'est pas dans le PATH.
