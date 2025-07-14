@@ -19,6 +19,19 @@ if %errorlevel% neq 0 (
 
 echo Python est installé.
 
+REM Vérifier si Git est installé
+echo Vérification de l'installation de Git...
+git --version >nul 2>nul
+if %errorlevel% neq 0 (
+    echo Git n'est pas installé ou n'est pas dans le PATH.
+    echo Veuillez l'installer depuis https://git-scm.com/downloads
+    pause
+    exit
+)
+
+echo Git est installé.
+
+
 REM Créer un environnement virtuel
 if not exist venv (
     echo Création de l'environnement virtuel...
@@ -33,7 +46,10 @@ python -m pip install --upgrade pip
 
 REM Installer les dépendances
 echo Installation des dépendances...
-pip install -r requirements.txt
+pip install torch PyQt6 accelerate
+
+echo Installation de la dernière version de Transformers depuis GitHub...
+pip install git+https://github.com/huggingface/transformers.git@main
 
 echo.
 echo #################################################################
