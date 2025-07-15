@@ -39,68 +39,17 @@ Pour que l'installation fonctionne, vous **DEVEZ** activer le support des chemin
 
 #### Pour macOS et Linux
 
-1.  Rendez les scripts exécutables (une seule fois) : `chmod +x install.sh run.sh run_api.sh`
+1.  Rendez les scripts exécutables (une seule fois) : `chmod +x install.sh run.sh`
 2.  Exécutez le script d'installation : `./install.sh`
 
-## Deux Modes d'Utilisation
+## Lancement de l'Application
 
-Ce projet peut être utilisé de deux manières : via une interface graphique de bureau, ou via une API compatible avec OpenAI.
-
-### 1. Interface Graphique de Bureau
-
-#### Lancement
 -   **Windows** : Double-cliquez sur `run.bat`.
 -   **macOS / Linux** : Exécutez `./run.sh`.
 
-#### Utilisation
+## Comment l'utiliser
+
 1.  **Lancez l'application**.
 2.  **Sélectionnez un modèle** dans la liste.
-3.  **(Optionnel) Paramètres** : Cliquez sur "Paramètres" pour ajuster le prompt système et les options de génération.
+3.  **(Optionnel) Paramètres** : Cliquez sur "Paramètres" pour ajuster le prompt système et les options de génération (température, etc.).
 4.  **Discutez** !
-
-### 2. API Compatible OpenAI
-
-#### Lancement
--   **Windows** : Double-cliquez sur `run_api.bat`.
--   **macOS / Linux** : Exécutez `./run_api.sh`.
-
-Le serveur démarrera sur `http://localhost:8000`.
-
-#### Utilisation
-
-Vous pouvez maintenant utiliser ce serveur comme un remplacement direct de l'API OpenAI dans vos outils et scripts. Le point de terminaison principal est `/v1/chat/completions`.
-
-**Exemple avec `curl` :**
-
-```bash
-curl -X POST "http://localhost:8000/v1/chat/completions" \
--H "Content-Type: application/json" \
--d '{
-  "model": "LiquidAI/LFM2-350M",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "What is C. elegans?"}
-  ]
-}'
-```
-
-**Réponse attendue :**
-
-```json
-{
-  "id": "chatcmpl-...",
-  "object": "chat.completion",
-  "created": 1677652288,
-  "model": "LiquidAI/LFM2-350M",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "C. elegans, or Caenorhabditis elegans, is a type of nematode worm..."
-      },
-      "finish_reason": "stop"
-    }
-  ]
-}
-```
