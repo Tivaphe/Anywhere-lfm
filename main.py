@@ -181,10 +181,9 @@ class LiquidAIApp(QWidget):
         self.tokenizer = tokenizer
 
         # Accès plus sûr au nom du modèle
+        model_name = self.model_selector.currentText()
         if hasattr(model, 'config') and hasattr(model.config, '_name_or_path'):
             model_name = model.config._name_or_path
-        else:
-            model_name = self.model_selector.currentText()
 
         self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
         self.set_ui_enabled(True)
@@ -253,7 +252,9 @@ class LiquidAIApp(QWidget):
         self.chat_area.clear()
         self.check_device()
         if self.model:
-            model_name = getattr(self.model, 'config', {}).get('_name_or_path', self.model_selector.currentText())
+            model_name = self.model_selector.currentText()
+            if hasattr(self.model, 'config') and hasattr(self.model.config, '_name_or_path'):
+                model_name = self.model.config._name_or_path
             self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
 
         if not self.current_conversation_id: return
