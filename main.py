@@ -179,7 +179,13 @@ class LiquidAIApp(QWidget):
     def on_model_loaded(self, model, tokenizer):
         self.model = model
         self.tokenizer = tokenizer
-        model_name = getattr(model, 'config', {}).get('_name_or_path', self.model_selector.currentText())
+
+        # Accès plus sûr au nom du modèle
+        if hasattr(model, 'config') and hasattr(model.config, '_name_or_path'):
+            model_name = model.config._name_or_path
+        else:
+            model_name = self.model_selector.currentText()
+
         self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
         self.set_ui_enabled(True)
         if self.current_conversation_id:
