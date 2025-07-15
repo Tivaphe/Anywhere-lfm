@@ -24,7 +24,7 @@ source venv/bin/activate
 # Mettre à jour pip et installer les dépendances
 pip install --upgrade pip
 echo "Installation des dépendances..."
-pip install torch PyQt6 accelerate
+pip install torch PyQt6 accelerate fastapi uvicorn[standard] markdown2
 pip install "transformers @ git+https://github.com/huggingface/transformers.git@main"
 
 echo

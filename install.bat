@@ -36,7 +36,7 @@ call venv\\Scripts\\activate
 REM Mettre à jour pip et installer les dépendances
 echo Installation des dépendances...
 pip install --upgrade pip
-pip install torch PyQt6 accelerate
+pip install torch PyQt6 accelerate fastapi uvicorn[standard] markdown2
 pip install "transformers @ git+https://github.com/huggingface/transformers.git@main"
 
 echo.
