@@ -1,6 +1,8 @@
 <img width="1442" height="841" alt="Capture d'écran 2025-07-15 204919" src="https://github.com/user-attachments/assets/885a78a4-9102-4d1c-83fb-607610486a95" />
 
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 
 # Application de Chat LiquidAI avec Transformers
 
