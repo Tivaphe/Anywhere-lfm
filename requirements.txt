@@ -4,4 +4,10 @@ fastapi
 uvicorn[standard]
 markdown2
 torch
-transformers @ git+https://github.com/huggingface/transformers.git@main
+transformers
+# RAG Dependencies
+langchain
+sentence-transformers
+faiss-cpu
+pypdf
+python-docx

@@ -80,6 +80,19 @@ Ce projet peut être utilisé de deux manières : via une interface graphique de
 3.  **(Optionnel) Paramètres** : Cliquez sur "Paramètres" pour ajuster le prompt système et les options de génération.
 4.  **Discutez** !
 
+### 3. Fonctionnalité RAG (Retrieval-Augmented Generation)
+
+LiquidAI inclut une fonctionnalité RAG qui permet au modèle d'utiliser le contenu de vos documents pour répondre à vos questions.
+
+#### Comment ça marche ?
+
+1.  **Charger des documents** : Cliquez sur le bouton "Charger Documents" pour sélectionner un ou plusieurs fichiers (`.txt`, `.pdf`, `.docx`).
+2.  **Création de l'index** : L'application traite ces documents, les découpe en petits morceaux (chunks), et les transforme en vecteurs numériques à l'aide d'un modèle d'embedding local (`all-MiniLM-L6-v2`). Ces vecteurs sont stockés dans un index local (FAISS).
+3.  **Activer le RAG** : Cochez la case "Activer RAG".
+4.  **Poser une question** : Lorsque vous posez une question, l'application recherche les morceaux de documents les plus pertinents dans l'index et les injecte dans le contexte de votre question avant de l'envoyer au modèle LFM2.
+
+Cela permet au modèle de répondre à des questions sur des sujets spécifiques contenus dans vos documents, même s'il n'a pas été entraîné sur ces données.
+
 ### 2. API Compatible OpenAI
 
 #### Lancement

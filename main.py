@@ -4,11 +4,18 @@ import json
 import uuid
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QLineEdit, QPushButton, QComboBox, QLabel,
-                             QHBoxLayout, QSplitter, QListWidget, QListWidgetItem)
+                             QHBoxLayout, QSplitter, QListWidget, QListWidgetItem,
+                             QFileDialog, QCheckBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 import torch
 import markdown2
+
+# RAG specific imports
+from langchain.document_loaders import PyPDFLoader, TextIOLoader, Docx2txtLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.embeddings import HuggingFaceEmbeddings
 
 from settings import SettingsWindow
 
@@ -72,6 +79,12 @@ class LiquidAIApp(QWidget):
             "system_prompt": "You are a helpful assistant.", "temperature": 0.3,
             "min_p": 0.15, "repetition_penalty": 1.05
         }
+        # RAG attributes
+        self.rag_enabled = False
+        self.vector_store = None
+        self.rag_documents_path = "documents/"
+        os.makedirs(self.rag_documents_path, exist_ok=True)
+
 
         self.init_ui()
         self.check_device()
@@ -134,6 +147,20 @@ class LiquidAIApp(QWidget):
         right_layout.addLayout(model_controls_layout)
         right_layout.addWidget(self.chat_area)
         right_layout.addLayout(input_layout)
+
+        # --- RAG Controls ---
+        rag_layout = QHBoxLayout()
+        self.load_docs_button = QPushButton("Charger Documents")
+        self.load_docs_button.clicked.connect(self.load_documents)
+        self.rag_toggle_checkbox = QCheckBox("Activer RAG")
+        self.rag_toggle_checkbox.stateChanged.connect(self.toggle_rag)
+        self.rag_status_label = QLabel("RAG: Inactif - Aucun document chargé")
+
+        rag_layout.addWidget(self.load_docs_button)
+        rag_layout.addWidget(self.rag_toggle_checkbox)
+        rag_layout.addWidget(self.rag_status_label)
+        right_layout.addLayout(rag_layout)
+
 
         # --- Splitter pour séparer les panneaux ---
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -224,13 +251,35 @@ class LiquidAIApp(QWidget):
         user_message = self.input_field.text().strip()
         if not user_message or not self.model or not self.current_conversation_id: return
 
+        # RAG Logic
+        rag_context = ""
+        if self.rag_enabled and self.vector_store:
+            try:
+                docs = self.vector_store.similarity_search(user_message, k=3)
+                rag_context = "\n\nContexte des documents:\n" + "\n---\n".join([doc.page_content for doc in docs])
+                self.chat_area.append(f"<i>Contexte RAG trouvé:\n{rag_context}</i>")
+            except Exception as e:
+                self.on_error(f"Erreur de recherche RAG: {e}")
+
+
+        # Mettre à jour l'historique avec le message utilisateur
+        # Note: Le contexte RAG n'est PAS ajouté à l'historique sauvegardé,
+        # il est injecté temporairement dans le prompt.
         self.append_message("user", user_message)
         self.input_field.clear()
+
 
         self.chat_area.append("<i>L'IA est en train d'écrire...</i>")
         self.set_ui_enabled(False)
 
-        conversation_history = self.conversations[self.current_conversation_id]
+        # Préparer l'historique pour le modèle
+        conversation_history = list(self.conversations[self.current_conversation_id]) # Copie
+
+        # Injecter le contexte RAG dans le dernier message utilisateur
+        if rag_context:
+            conversation_history[-1]["content"] = f"{rag_context}\n\nQuestion: {user_message}"
+
+
         self.generation_worker = GenerationWorker(self.model, self.tokenizer, conversation_history, self.settings)
         self.generation_worker.generation_complete.connect(self.on_generation_complete)
         self.generation_worker.error.connect(self.on_error)
@@ -257,6 +306,80 @@ class LiquidAIApp(QWidget):
         self.send_button.setEnabled(enabled)
         self.model_selector.setEnabled(enabled)
         self.history_list.setEnabled(enabled)
+        self.load_docs_button.setEnabled(enabled)
+        self.rag_toggle_checkbox.setEnabled(enabled and self.vector_store is not None)
+
+    # --- RAG Fonctions ---
+    def toggle_rag(self, state):
+        self.rag_enabled = (state == Qt.CheckState.Checked.value)
+        if self.rag_enabled:
+            self.rag_status_label.setText("RAG: Actif")
+            self.chat_area.append("<i>RAG activé. Les documents chargés seront utilisés comme contexte.</i>")
+        else:
+            self.rag_status_label.setText("RAG: Inactif")
+            self.chat_area.append("<i>RAG désactivé.</i>")
+
+    def load_documents(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Sélectionner des documents", "", "Documents (*.txt *.pdf *.docx)"
+        )
+        if not files:
+            return
+
+        self.chat_area.append(f"<i>Chargement de {len(files)} document(s)...</i>")
+        QApplication.processEvents() # Pour que le message s'affiche
+
+        # Copier les fichiers dans le dossier local
+        for file_path in files:
+            filename = os.path.basename(file_path)
+            destination = os.path.join(self.rag_documents_path, filename)
+            try:
+                with open(file_path, 'rb') as f_in, open(destination, 'wb') as f_out:
+                    f_out.write(f_in.read())
+            except Exception as e:
+                self.on_error(f"Erreur lors de la copie du fichier {filename}: {e}")
+                return
+
+        self.chat_area.append("<i>Création de la base de données vectorielle...</i>")
+        QApplication.processEvents()
+
+        try:
+            # 1. Charger les documents depuis le dossier
+            docs = []
+            for filename in os.listdir(self.rag_documents_path):
+                file_path = os.path.join(self.rag_documents_path, filename)
+                if filename.endswith(".pdf"):
+                    loader = PyPDFLoader(file_path)
+                    docs.extend(loader.load())
+                elif filename.endswith(".docx"):
+                    loader = Docx2txtLoader(file_path)
+                    docs.extend(loader.load())
+                elif filename.endswith(".txt"):
+                    loader = TextIOLoader(file_path, encoding='utf-8')
+                    docs.extend(loader.load())
+
+            if not docs:
+                self.on_error("Aucun document valide trouvé à traiter.")
+                return
+
+            # 2. Splitter les documents
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            splits = text_splitter.split_documents(docs)
+
+            # 3. Créer les embeddings et l'index FAISS
+            embeddings = HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2')
+            self.vector_store = FAISS.from_documents(splits, embeddings)
+
+            self.rag_status_label.setText("RAG: Prêt")
+            self.rag_toggle_checkbox.setEnabled(True)
+            self.chat_area.append("<i>Base de données vectorielle créée avec succès. Vous pouvez maintenant activer le RAG.</i>")
+
+        except Exception as e:
+            self.on_error(f"Erreur lors de la création de l'index RAG : {e}")
+            self.rag_status_label.setText("RAG: Erreur")
+            self.vector_store = None
+            self.rag_toggle_checkbox.setEnabled(False)
+
 
     # --- Fonctions de gestion de l'historique ---
 
