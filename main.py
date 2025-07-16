@@ -352,7 +352,7 @@ class LiquidAIApp(QWidget):
         self.input_field.clear()
 
 
-        self.chat_area.append("<i>L'IA est en train d'écrire...</i>")
+        self.chat_area.append("<i>L'IA réfléchi...</i>")
         self.set_ui_enabled(False)
 
         # Préparer l'historique pour le modèle
@@ -374,7 +374,7 @@ class LiquidAIApp(QWidget):
 
     def on_new_token(self, token):
         if not self.current_assistant_message: # First token
-            # Remove the "L'IA est en train d'écrire..." message
+            # Remove the "L'IA réfléchi..." message
             cursor = self.chat_area.textCursor()
             cursor.movePosition(cursor.MoveOperation.End)
             cursor.select(cursor.SelectionType.LineUnderCursor)
@@ -546,7 +546,7 @@ class LiquidAIApp(QWidget):
             # Le contenu de l'assistant est déjà du HTML de markdown2
             formatted_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
             html = f"""
-            <div style='background-color: #F1F8E9; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+            <div style='background-color: #d8d9d7; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
                 <b>LiquidAI:</b>
                 {formatted_content}
             </div>
