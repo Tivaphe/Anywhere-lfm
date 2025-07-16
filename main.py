@@ -41,11 +41,26 @@ from PyQt6.QtCore import QObject
 
 class PyQtStreamer(QObject, TextStreamer):
     new_token = pyqtSignal(str)
+
     def __init__(self, tokenizer):
         QObject.__init__(self)
         TextStreamer.__init__(self, tokenizer)
-    def on_finalized_text(self, text: str, stream_end: bool = False):
-        self.new_token.emit(text)
+        # REMOVED: self.new_token.connect(self.on_new_token)  # This causes an infinite loop
+
+    def on_new_token(self, token):
+        self.new_token.emit(token)
+
+    def put(self, value):
+        # Adjusted to handle value properly (assuming value is a numpy array or tensor with single token)
+        if hasattr(value, 'item'):
+            token_id = value.item()
+        else:
+            token_id = int(value)
+        decoded = self.tokenizer.decode(token_id)
+        self.on_new_token(decoded)
+
+    def end(self):
+        pass
 
 class GenerationWorker(QThread):
     generation_complete = pyqtSignal(str) # Still needed for the full response
@@ -79,20 +94,10 @@ class GenerationWorker(QThread):
             )
 
             start_time = time.time()
-            # This will now block until generation is complete, but the streamer will emit signals
-            self.model.generate(**generation_kwargs)
+            # Capture the outputs from the generation with streamer
+            outputs = self.model.generate(**generation_kwargs)
             end_time = time.time()
 
-            # The streamer doesn't give us the full text, so we'll have to regenerate it
-            # (or accumulate it, which is more complex to get right with tokenization artifacts).
-            # For simplicity, we decode the full sequence.
-            with torch.no_grad():
-                 outputs = self.model.generate(
-                    input_ids, max_new_tokens=512, do_sample=True,
-                    temperature=self.settings["temperature"],
-                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
-                    repetition_penalty=self.settings["repetition_penalty"]
-                )
             new_tokens = outputs[0][input_ids.shape[-1]:]
             num_new_tokens = len(new_tokens)
             result = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
