@@ -12,10 +12,10 @@ import torch
 import markdown2
 
 # RAG specific imports
-from langchain.document_loaders import PyPDFLoader, TextIOLoader, Docx2txtLoader
+from langchain_community.document_loaders import PyPDFLoader, TextIOLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from settings import SettingsWindow
 
