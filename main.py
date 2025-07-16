@@ -166,6 +166,7 @@ class LiquidAIApp(QWidget):
         self.current_assistant_message = ""
 
         self.init_ui()
+      
         self.refresh_model_list()
         self.load_conversations()
         self.start_new_conversation()
