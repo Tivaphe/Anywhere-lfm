@@ -34,10 +34,9 @@ echo Activation de l'environnement virtuel...
 call venv\\Scripts\\activate
 
 REM Mettre à jour pip et installer les dépendances
-echo Installation des dépendances...
+echo Installation des dépendances depuis requirements.txt...
 pip install --upgrade pip
-pip install torch PyQt6 accelerate fastapi uvicorn[standard] markdown2
-pip install "transformers @ git+https://github.com/huggingface/transformers.git@main"
+pip install -r requirements.txt
 
 echo.
 echo #################################################################
@@ -46,6 +45,5 @@ echo #            Installation terminée !                            #
 echo #                                                               #
 echo #################################################################
 echo.
-echo Vous pouvez maintenant lancer l'application en exécutant run.bat
-echo.
-pause
+echo Lancement de l'application...
+call run.bat

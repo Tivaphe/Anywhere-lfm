@@ -1,0 +1,7 @@
+PyQt6
+accelerate
+fastapi
+uvicorn[standard]
+markdown2
+torch
+transformers @ git+https://github.com/huggingface/transformers.git@main
