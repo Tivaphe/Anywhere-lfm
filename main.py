@@ -166,7 +166,6 @@ class LiquidAIApp(QWidget):
         self.current_assistant_message = ""
 
         self.init_ui()
-        self.check_device()
         self.refresh_model_list()
         self.load_conversations()
         self.start_new_conversation()
@@ -301,6 +300,7 @@ class LiquidAIApp(QWidget):
 
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
+        self.check_device()
 
     # ... (le reste du code sera ajouté dans les prochaines étapes)
     def check_device(self):
