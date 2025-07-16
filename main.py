@@ -562,7 +562,6 @@ class LiquidAIApp(QWidget):
         self.history_list.setCurrentItem(item)
 
         self.display_current_conversation()
-        self.save_conversations()
 
     def load_selected_conversation(self, item):
         self.current_conversation_id = item.data(Qt.ItemDataRole.UserRole)
