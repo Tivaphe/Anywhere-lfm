@@ -42,8 +42,8 @@ from PyQt6.QtCore import QObject
 class PyQtStreamer(QObject, TextStreamer):
     new_token = pyqtSignal(str)
     def __init__(self, tokenizer):
-        super().__init__()
-        TextStreamer.__init__(self, tokenizer=tokenizer)
+        QObject.__init__(self)
+        TextStreamer.__init__(self, tokenizer)
     def on_finalized_text(self, text: str, stream_end: bool = False):
         self.new_token.emit(text)
 
