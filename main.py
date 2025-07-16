@@ -184,7 +184,6 @@ class LiquidAIApp(QWidget):
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
         left_layout.addWidget(self.history_list)
-
         new_chat_button = QPushButton("Nouvelle Discussion")
         new_chat_button.clicked.connect(self.start_new_conversation)
         left_layout.addWidget(new_chat_button)
