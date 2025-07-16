@@ -12,7 +12,7 @@ import torch
 import markdown2
 
 # RAG specific imports
-from langchain_community.document_loaders import PyPDFLoader, TextIOLoader, Docx2txtLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -355,7 +355,7 @@ class LiquidAIApp(QWidget):
                     loader = Docx2txtLoader(file_path)
                     docs.extend(loader.load())
                 elif filename.endswith(".txt"):
-                    loader = TextIOLoader(file_path, encoding='utf-8')
+                    loader = TextLoader(file_path, encoding='utf-8')
                     docs.extend(loader.load())
 
             if not docs:
