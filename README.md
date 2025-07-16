@@ -4,7 +4,7 @@
 
 # Application de Chat LiquidAI avec Transformers
 
-Une application de bureau simple pour discuter avec les modèles d'IA de LiquidAI, optimisée pour la bibliothèque `transformers`.
+Une application de bureau simple pour discuter avec les modèles LFM2 de LiquidAI, optimisée pour la bibliothèque `transformers`.
 
 ## ⚠️ Prérequis Important pour les Utilisateurs Windows
 
