@@ -177,22 +177,17 @@ class LiquidAIApp(QWidget):
         # --- Panneau de gauche (Historique) ---
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0,0,0,0)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.load_selected_conversation)
-
-        # --- NOUVELLE LIGNE ---
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
-        # --------------------
-        left_layout.addWidget(self.history_list) # Assurez-vous que c'est bien après la création
+        left_layout.addWidget(self.history_list)
 
         new_chat_button = QPushButton("Nouvelle Discussion")
         new_chat_button.clicked.connect(self.start_new_conversation)
-
         left_layout.addWidget(new_chat_button)
-        left_layout.addWidget(self.history_list)
 
     def show_conversation_context_menu(self, position):
         # Récupérer l'élément sur lequel l'utilisateur a cliqué
@@ -248,50 +243,48 @@ class LiquidAIApp(QWidget):
         # --- Panneau de droite (Chat) ---
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0,0,0,0)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
         self.chat_area = QTextEdit()
         self.chat_area.setReadOnly(True)
-        self.chat_area.setStyleSheet("font-size: 14px;") # Police augmentée
+        self.chat_area.setStyleSheet("font-size: 14px;")
+        right_layout.addWidget(self.chat_area)
 
+  # --- Contrôles du modèle ---
         model_controls_layout = QHBoxLayout()
         self.model_selector = QComboBox()
         self.model_selector.currentTextChanged.connect(self.on_model_change)
         settings_button = QPushButton("Paramètres")
         settings_button.clicked.connect(self.open_settings)
-
         self.eject_button = QPushButton("Ejecter")
         self.eject_button.clicked.connect(self.eject_model)
-        self.eject_button.setEnabled(False) # Désactivé par défaut
-
+        self.eject_button.setEnabled(False)
         model_controls_layout.addWidget(QLabel("Modèle:"))
         model_controls_layout.addWidget(self.model_selector)
         model_controls_layout.addWidget(self.eject_button)
         model_controls_layout.addWidget(settings_button)
+        right_layout.addLayout(model_controls_layout)
 
+    # --- Zone de saisie utilisateur ---
         input_layout = QHBoxLayout()
         self.input_field = QLineEdit()
-        self.input_field.setStyleSheet("font-size: 14px;") # Police augmentée
+        self.input_field.setStyleSheet("font-size: 14px;")
         self.input_field.setPlaceholderText("Posez votre question ici...")
         self.input_field.returnPressed.connect(self.send_message)
         self.send_button = QPushButton("Envoyer")
         self.send_button.clicked.connect(self.send_message)
         input_layout.addWidget(self.input_field)
         input_layout.addWidget(self.send_button)
-
-        right_layout.addLayout(model_controls_layout)
-        right_layout.addWidget(self.chat_area)
         right_layout.addLayout(input_layout)
 
-        # --- RAG Controls ---
+    # --- RAG Controls ---
         rag_layout = QHBoxLayout()
         self.load_docs_button = QPushButton("Charger Documents")
         self.load_docs_button.clicked.connect(self.load_documents)
         self.rag_toggle_checkbox = QCheckBox("Activer RAG")
         self.rag_toggle_checkbox.stateChanged.connect(self.toggle_rag)
         self.rag_status_label = QLabel("RAG: Inactif - Aucun document chargé")
-        self.stats_label = QLabel("") # For tokens/s
-
+        self.stats_label = QLabel("")
         rag_layout.addWidget(self.load_docs_button)
         rag_layout.addWidget(self.rag_toggle_checkbox)
         rag_layout.addWidget(self.rag_status_label)
@@ -300,11 +293,11 @@ class LiquidAIApp(QWidget):
         right_layout.addLayout(rag_layout)
 
 
-        # --- Splitter pour séparer les panneaux ---
+    # --- Splitter pour séparer les panneaux ---
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
-        splitter.setSizes([250, 750]) # Tailles initiales
+        splitter.setSizes([250, 750])  # Tailles initiales
 
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
