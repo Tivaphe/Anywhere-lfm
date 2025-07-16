@@ -170,8 +170,7 @@ class LiquidAIApp(QWidget):
         self.check_device()
         self.refresh_model_list()
         self.load_conversations()
-        if not self.history_list.count():
-            self.start_new_conversation()
+        self.start_new_conversation()
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -184,11 +183,69 @@ class LiquidAIApp(QWidget):
         self.history_list = QListWidget()
         self.history_list.itemClicked.connect(self.load_selected_conversation)
 
+        # --- NOUVELLE LIGNE ---
+        self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
+        # --------------------
+        left_layout.addWidget(self.history_list) # Assurez-vous que c'est bien après la création
+
         new_chat_button = QPushButton("Nouvelle Discussion")
         new_chat_button.clicked.connect(self.start_new_conversation)
 
         left_layout.addWidget(new_chat_button)
         left_layout.addWidget(self.history_list)
+
+  def show_conversation_context_menu(self, position):
+        # Récupérer l'élément sur lequel l'utilisateur a cliqué
+        item = self.history_list.itemAt(position)
+        if not item:
+            return # Ne rien faire si le clic est dans le vide
+
+        # Créer le menu
+        context_menu = QMenu(self)
+
+        # Créer l'action "Supprimer"
+        delete_action = context_menu.addAction("Supprimer")
+
+        # Exécuter le menu et attendre que l'utilisateur choisisse une action
+        action = context_menu.exec(self.history_list.mapToGlobal(position))
+
+        # Si l'utilisateur a cliqué sur "Supprimer"
+        if action == delete_action:
+            self.delete_conversation(item)
+
+
+  def delete_conversation(self, item):
+        # Récupérer l'ID de la conversation à partir de l'élément de la liste
+        conv_id = item.data(Qt.ItemDataRole.UserRole)
+
+        # --- Étape 1: Supprimer le fichier de sauvegarde ---
+        file_path = f"conversations/{conv_id}.json"
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                self.on_error(f"Impossible de supprimer le fichier {file_path}: {e}")
+                return
+
+    # --- Étape 2: Supprimer l'entrée du dictionnaire interne ---
+        if conv_id in self.conversations:
+            del self.conversations[conv_id]
+
+    # --- Étape 3: Retirer l'élément de la QListWidget ---
+        row = self.history_list.row(item)
+        self.history_list.takeItem(row)
+
+    # --- Étape 4: Gérer le cas où on supprime la conversation active ---
+        if self.current_conversation_id == conv_id:
+            # Si la liste n'est pas vide, on charge la première conversation
+            if self.history_list.count() > 0:
+                first_item = self.history_list.item(0)
+                self.history_list.setCurrentItem(first_item)
+                self.load_selected_conversation(first_item)
+            else:
+                # Sinon, on en crée une nouvelle
+                self.start_new_conversation()
 
         # --- Panneau de droite (Chat) ---
         right_panel = QWidget()
