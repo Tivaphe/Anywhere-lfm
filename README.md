@@ -1,6 +1,6 @@
 <img width="1442" height="841" alt="Capture d'écran 2025-07-15 204919" src="https://github.com/user-attachments/assets/885a78a4-9102-4d1c-83fb-607610486a95" />
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+    [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Application de Chat LiquidAI avec Transformers
 
@@ -36,15 +36,31 @@ Pour que l'installation fonctionne, vous **DEVEZ** activer le support des chemin
 
 ### Instructions d'Installation
 
+L'installation est conçue pour être aussi simple que possible et pour optimiser les lancements futurs.
+
 #### Pour Windows
 
-1.  Assurez-vous d'avoir suivi le prérequis important ci-dessus.
-2.  Double-cliquez sur `install.bat`.
+1.  **Première fois uniquement :**
+    *   Assurez-vous d'avoir suivi le prérequis important ci-dessus (activation des chemins longs).
+    *   Double-cliquez sur `install.bat`.
+    *   Ce script va :
+        1.  Créer un environnement virtuel Python (`venv`).
+        2.  Télécharger toutes les dépendances nécessaires dans un dossier local `local_packages`.
+        3.  Installer ces dépendances depuis le dossier local.
+    *   L'application démarrera automatiquement à la fin de l'installation.
+
+2.  **Les fois suivantes :**
+    *   Double-cliquez simplement sur `run.bat` pour lancer l'application. Le démarrage sera beaucoup plus rapide.
 
 #### Pour macOS et Linux
 
-1.  Rendez les scripts exécutables (une seule fois) : `chmod +x install.sh run.sh run_api.sh`
-2.  Exécutez le script d'installation : `./install.sh`
+1.  **Première fois uniquement :**
+    *   Rendez les scripts exécutables : `chmod +x install.sh run.sh run_api.sh`.
+    *   Exécutez le script d'installation : `./install.sh`.
+    *   L'application démarrera automatiquement à la fin de l'installation.
+
+2.  **Les fois suivantes :**
+    *   Exécutez simplement `./run.sh` pour lancer l'application.
 
 ## Deux Modes d'Utilisation
 

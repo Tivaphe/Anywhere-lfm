@@ -111,8 +111,14 @@ class LiquidAIApp(QWidget):
         self.model_selector.currentTextChanged.connect(self.on_model_change)
         settings_button = QPushButton("Paramètres")
         settings_button.clicked.connect(self.open_settings)
+
+        self.eject_button = QPushButton("Ejecter")
+        self.eject_button.clicked.connect(self.eject_model)
+        self.eject_button.setEnabled(False) # Désactivé par défaut
+
         model_controls_layout.addWidget(QLabel("Modèle:"))
         model_controls_layout.addWidget(self.model_selector)
+        model_controls_layout.addWidget(self.eject_button)
         model_controls_layout.addWidget(settings_button)
 
         input_layout = QHBoxLayout()
@@ -187,8 +193,32 @@ class LiquidAIApp(QWidget):
 
         self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
         self.set_ui_enabled(True)
+        self.eject_button.setEnabled(True) # Activer le bouton Ejecter
         if self.current_conversation_id:
             self.display_current_conversation()
+
+    def eject_model(self):
+        if self.model is None:
+            return
+
+        model_name = self.model_selector.currentText()
+        self.chat_area.append(f"<i>Déchargement du modèle {model_name}...</i>")
+
+        # Supprimer les objets modèle et tokenizer
+        del self.model
+        del self.tokenizer
+        self.model = None
+        self.tokenizer = None
+
+        # Vider le cache CUDA
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            self.chat_area.append("<i>Cache GPU vidé.</i>")
+
+        self.chat_area.append("<i>Modèle déchargé. Sélectionnez un modèle pour commencer.</i>")
+        self.eject_button.setEnabled(False) # Désactiver après l'éjection
+        self.input_field.setEnabled(False) # Désactiver la saisie
+        self.send_button.setEnabled(False)
 
     def send_message(self):
         user_message = self.input_field.text().strip()

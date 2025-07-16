@@ -33,11 +33,20 @@ if not exist venv (
 echo Activation de l'environnement virtuel...
 call venv\\Scripts\\activate
 
-REM Mettre à jour pip et installer les dépendances
-echo Installation des dépendances...
+REM Créer le dossier pour les paquets locaux s'il n'existe pas
+if not exist local_packages (
+    echo Création du dossier pour les paquets locaux...
+    mkdir local_packages
+)
+
+REM Télécharger les paquets dans le dossier local
+echo Téléchargement des dépendances dans le cache local...
+pip download -r requirements.txt -d local_packages
+
+REM Mettre à jour pip et installer les dépendances depuis le cache local
+echo Installation des dépendances depuis le cache local...
 pip install --upgrade pip
-pip install torch PyQt6 accelerate fastapi uvicorn[standard] markdown2
-pip install "transformers @ git+https://github.com/huggingface/transformers.git@main"
+pip install --no-index --find-links=local_packages -r requirements.txt
 
 echo.
 echo #################################################################
@@ -46,6 +55,5 @@ echo #            Installation terminée !                            #
 echo #                                                               #
 echo #################################################################
 echo.
-echo Vous pouvez maintenant lancer l'application en exécutant run.bat
-echo.
-pause
+echo Lancement de l'application...
+call run.bat
