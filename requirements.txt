@@ -4,7 +4,7 @@ fastapi
 uvicorn[standard]
 markdown2
 torch
-transformers
+transformers @ git+https://github.com/huggingface/transformers.git@main
 # RAG Dependencies
 langchain
 langchain-community
