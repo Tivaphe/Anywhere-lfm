@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLineEdit, QLabel,
-                             QDialogButtonBox, QDoubleSpinBox, QFormLayout)
+                             QDialogButtonBox, QDoubleSpinBox, QFormLayout, QSpinBox)
 
 class SettingsWindow(QDialog):
     def __init__(self, parent=None):
@@ -31,6 +31,18 @@ class SettingsWindow(QDialog):
         self.repetition_penalty_field.setSingleStep(0.05)
         form_layout.addRow(QLabel("Repetition Penalty:"), self.repetition_penalty_field)
 
+        # RAG Settings
+        self.chunk_size_field = QSpinBox()
+        self.chunk_size_field.setRange(100, 2000)
+        self.chunk_size_field.setSingleStep(50)
+        form_layout.addRow(QLabel("RAG Chunk Size:"), self.chunk_size_field)
+
+        self.chunk_overlap_field = QSpinBox()
+        self.chunk_overlap_field.setRange(0, 1000)
+        self.chunk_overlap_field.setSingleStep(10)
+        form_layout.addRow(QLabel("RAG Chunk Overlap:"), self.chunk_overlap_field)
+
+
         self.layout.addLayout(form_layout)
 
         # Boutons OK et Annuler
@@ -45,7 +57,9 @@ class SettingsWindow(QDialog):
             "system_prompt": self.system_prompt_field.text(),
             "temperature": self.temperature_field.value(),
             "min_p": self.min_p_field.value(),
-            "repetition_penalty": self.repetition_penalty_field.value()
+            "repetition_penalty": self.repetition_penalty_field.value(),
+            "rag_chunk_size": self.chunk_size_field.value(),
+            "rag_chunk_overlap": self.chunk_overlap_field.value()
         }
 
     def set_settings(self, settings):
@@ -53,3 +67,5 @@ class SettingsWindow(QDialog):
         self.temperature_field.setValue(settings.get("temperature", 0.3))
         self.min_p_field.setValue(settings.get("min_p", 0.15))
         self.repetition_penalty_field.setValue(settings.get("repetition_penalty", 1.05))
+        self.chunk_size_field.setValue(settings.get("rag_chunk_size", 500))
+        self.chunk_overlap_field.setValue(settings.get("rag_chunk_overlap", 50))

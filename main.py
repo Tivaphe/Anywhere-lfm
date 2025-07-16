@@ -7,8 +7,9 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QHBoxLayout, QSplitter, QListWidget, QListWidgetItem,
                              QFileDialog, QCheckBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, TextStreamer
 import torch
+import time
 import markdown2
 
 # RAG specific imports
@@ -36,30 +37,69 @@ class ModelWorker(QThread):
         except Exception as e:
             self.error.emit(f"Erreur Transformers : {e}")
 
+class PyQtStreamer(TextStreamer):
+    new_token = pyqtSignal(str)
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer)
+    def on_finalized_text(self, text: str, stream_end: bool = False):
+        self.new_token.emit(text)
+
 class GenerationWorker(QThread):
-    generation_complete = pyqtSignal(str)
+    generation_complete = pyqtSignal(str) # Still needed for the full response
+    new_token = pyqtSignal(str)
     error = pyqtSignal(str)
+    stats = pyqtSignal(float) # For tokens/sec
+
     def __init__(self, model, tokenizer, conversation_history, settings):
         super().__init__()
         self.model = model
         self.tokenizer = tokenizer
         self.conversation_history = conversation_history
         self.settings = settings
+        self.streamer = PyQtStreamer(tokenizer)
+        self.streamer.new_token.connect(self.new_token) # Forward the signal
+
     def run(self):
         try:
             input_ids = self.tokenizer.apply_chat_template(
                 self.conversation_history, add_generation_prompt=True, return_tensors="pt"
             ).to(self.model.device)
+
+            generation_kwargs = dict(
+                input_ids=input_ids,
+                streamer=self.streamer,
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=self.settings["temperature"],
+                top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
+                repetition_penalty=self.settings["repetition_penalty"]
+            )
+
+            start_time = time.time()
+            # This will now block until generation is complete, but the streamer will emit signals
+            self.model.generate(**generation_kwargs)
+            end_time = time.time()
+
+            # The streamer doesn't give us the full text, so we'll have to regenerate it
+            # (or accumulate it, which is more complex to get right with tokenization artifacts).
+            # For simplicity, we decode the full sequence.
             with torch.no_grad():
-                outputs = self.model.generate(
+                 outputs = self.model.generate(
                     input_ids, max_new_tokens=512, do_sample=True,
                     temperature=self.settings["temperature"],
                     top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
                     repetition_penalty=self.settings["repetition_penalty"]
                 )
             new_tokens = outputs[0][input_ids.shape[-1]:]
+            num_new_tokens = len(new_tokens)
             result = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            duration = end_time - start_time
+            tokens_per_sec = num_new_tokens / duration if duration > 0 else 0
+
+            self.stats.emit(tokens_per_sec)
             self.generation_complete.emit(result)
+
         except Exception as e:
             self.error.emit(f"Erreur de génération : {e}")
 
@@ -77,13 +117,15 @@ class LiquidAIApp(QWidget):
         self.conversations = {} # Stocke les historiques de conversation
         self.settings = {
             "system_prompt": "You are a helpful assistant.", "temperature": 0.3,
-            "min_p": 0.15, "repetition_penalty": 1.05
+            "min_p": 0.15, "repetition_penalty": 1.05,
+            "rag_chunk_size": 500, "rag_chunk_overlap": 50
         }
         # RAG attributes
         self.rag_enabled = False
         self.vector_store = None
         self.rag_documents_path = "documents/"
         os.makedirs(self.rag_documents_path, exist_ok=True)
+        self.current_assistant_message = ""
 
 
         self.init_ui()
@@ -155,10 +197,13 @@ class LiquidAIApp(QWidget):
         self.rag_toggle_checkbox = QCheckBox("Activer RAG")
         self.rag_toggle_checkbox.stateChanged.connect(self.toggle_rag)
         self.rag_status_label = QLabel("RAG: Inactif - Aucun document chargé")
+        self.stats_label = QLabel("") # For tokens/s
 
         rag_layout.addWidget(self.load_docs_button)
         rag_layout.addWidget(self.rag_toggle_checkbox)
         rag_layout.addWidget(self.rag_status_label)
+        rag_layout.addStretch()
+        rag_layout.addWidget(self.stats_label)
         right_layout.addLayout(rag_layout)
 
 
@@ -265,7 +310,7 @@ class LiquidAIApp(QWidget):
         # Mettre à jour l'historique avec le message utilisateur
         # Note: Le contexte RAG n'est PAS ajouté à l'historique sauvegardé,
         # il est injecté temporairement dans le prompt.
-        self.append_message("user", user_message)
+        self.append_message("user", user_message, save=True)
         self.input_field.clear()
 
 
@@ -280,22 +325,46 @@ class LiquidAIApp(QWidget):
             conversation_history[-1]["content"] = f"{rag_context}\n\nQuestion: {user_message}"
 
 
+        self.current_assistant_message = "" # Reset for new message
+        self.stats_label.setText("") # Clear stats
         self.generation_worker = GenerationWorker(self.model, self.tokenizer, conversation_history, self.settings)
+        self.generation_worker.new_token.connect(self.on_new_token)
         self.generation_worker.generation_complete.connect(self.on_generation_complete)
+        self.generation_worker.stats.connect(self.on_stats_update)
         self.generation_worker.error.connect(self.on_error)
         self.generation_worker.start()
 
-    def on_generation_complete(self, response):
-        cursor = self.chat_area.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        cursor.select(cursor.SelectionType.LineUnderCursor)
-        cursor.removeSelectedText()
-        cursor.deletePreviousChar()
-        self.chat_area.setTextCursor(cursor)
+    def on_new_token(self, token):
+        if not self.current_assistant_message: # First token
+            # Remove the "L'IA est en train d'écrire..." message
+            cursor = self.chat_area.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.select(cursor.SelectionType.LineUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deletePreviousChar()
+            self.chat_area.setTextCursor(cursor)
+            self.append_message("assistant", token, save=False)
+        else:
+            # Append the new token to the existing message
+            cursor = self.chat_area.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.insertText(token)
+        self.current_assistant_message += token
 
-        self.append_message("assistant", response)
+    def on_stats_update(self, tokens_per_sec):
+        self.stats_label.setText(f"{tokens_per_sec:.2f} tokens/s")
+
+    def on_generation_complete(self, response):
+        # The streaming is done, now we save the full response and re-render it with markdown
+        self.conversations[self.current_conversation_id].append({"role": "assistant", "content": response})
+        self.save_conversations()
+
+        # Re-display the whole conversation to get proper markdown rendering
+        self.display_current_conversation()
+
         self.set_ui_enabled(True)
         self.input_field.setFocus()
+        self.current_assistant_message = "" # Clear for next time
 
     def on_error(self, error_message):
         self.chat_area.append(f"<font color='red'>Erreur : {error_message}</font>")
@@ -363,7 +432,10 @@ class LiquidAIApp(QWidget):
                 return
 
             # 2. Splitter les documents
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.settings["rag_chunk_size"],
+                chunk_overlap=self.settings["rag_chunk_overlap"]
+            )
             splits = text_splitter.split_documents(docs)
 
             # 3. Créer les embeddings et l'index FAISS
@@ -414,24 +486,40 @@ class LiquidAIApp(QWidget):
 
         history = self.conversations.get(self.current_conversation_id, [])
         for message in history:
-            if message["role"] == "user":
-                self.chat_area.append(f"<b>Vous:</b> {message['content']}")
-            elif message["role"] == "assistant":
-                html = markdown2.markdown(message['content'], extras=["fenced-code-blocks", "tables"])
-                self.chat_area.append(f"<b>LiquidAI:</b><br>{html}")
+            # On utilise une astuce: on appelle append_message sans sauvegarder
+            # pour réutiliser la logique d'affichage.
+            self.append_message(message["role"], message["content"], save=False)
 
-    def append_message(self, role, content):
+
+    def append_message(self, role, content, save=True):
         if not self.current_conversation_id: return
 
-        self.conversations[self.current_conversation_id].append({"role": role, "content": content})
+        if save:
+            self.conversations[self.current_conversation_id].append({"role": role, "content": content})
 
         if role == "user":
-            self.chat_area.append(f"<b>Vous:</b> {content}")
+            html = f"""
+            <div style='background-color: #E3F2FD; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+                <b>Vous:</b>
+                <p style='margin: 0;'>{content}</p>
+            </div>
+            """
         elif role == "assistant":
-            html = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
-            self.chat_area.append(f"<b>LiquidAI:</b><br>{html}")
+            # Le contenu de l'assistant est déjà du HTML de markdown2
+            formatted_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
+            html = f"""
+            <div style='background-color: #F1F8E9; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+                <b>LiquidAI:</b>
+                {formatted_content}
+            </div>
+            """
+        else: # system, error...
+            html = f"<i>{content}</i>"
 
-        self.save_conversations()
+        self.chat_area.append(html)
+
+        if save:
+            self.save_conversations()
 
     def save_conversations(self):
         os.makedirs("conversations", exist_ok=True)
