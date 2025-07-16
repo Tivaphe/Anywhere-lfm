@@ -537,7 +537,7 @@ class LiquidAIApp(QWidget):
 
         if role == "user":
             html = f"""
-            <div style='background-color: #E3F2FD; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
                 <b>Vous:</b>
                 <p style='margin: 0;'>{content}</p>
             </div>
@@ -546,7 +546,7 @@ class LiquidAIApp(QWidget):
             # Le contenu de l'assistant est déjà du HTML de markdown2
             formatted_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
             html = f"""
-            <div style='background-color: #d8d9d7; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
                 <b>LiquidAI:</b>
                 {formatted_content}
             </div>
