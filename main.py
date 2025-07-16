@@ -215,7 +215,7 @@ class LiquidAIApp(QWidget):
             self.delete_conversation(item)
 
 
-  def delete_conversation(self, item):
+    def delete_conversation(self, item):
         # Récupérer l'ID de la conversation à partir de l'élément de la liste
         conv_id = item.data(Qt.ItemDataRole.UserRole)
 
