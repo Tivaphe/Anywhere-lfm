@@ -15,7 +15,7 @@ import markdown2
 # RAG specific imports
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import FAISS  # Updated import
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from settings import SettingsWindow
@@ -39,28 +39,58 @@ class ModelWorker(QThread):
 
 from PyQt6.QtCore import QObject
 
-class PyQtStreamer(QObject, TextStreamer):
+class PyQtStreamer(TextStreamer, QObject):  # Swapped order: TextStreamer first, then QObject
     new_token = pyqtSignal(str)
 
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, skip_prompt=False, **decode_kwargs):
+        TextStreamer.__init__(self, tokenizer, skip_prompt=skip_prompt, **decode_kwargs)
         QObject.__init__(self)
-        TextStreamer.__init__(self, tokenizer)
-        # REMOVED: self.new_token.connect(self.on_new_token)  # This causes an infinite loop
-
-    def on_new_token(self, token):
-        self.new_token.emit(token)
+        # Initialize additional attributes to match TextStreamer's logic
+        self.token_cache = []
+        self.print_len = 0
+        self.next_tokens_are_prompt = True
 
     def put(self, value):
-        # Adjusted to handle value properly (assuming value is a numpy array or tensor with single token)
-        if hasattr(value, 'item'):
-            token_id = value.item()
+        """
+        Receives tokens, decodes them, and emits the decoded text via signal.
+        """
+        if len(value.shape) > 1 and value.shape[0] > 1:
+            raise ValueError("PyQtStreamer only supports batch size 1")
+        elif len(value.shape) > 1:
+            value = value[0]
+
+        if self.skip_prompt and self.next_tokens_are_prompt:
+            self.next_tokens_are_prompt = False
+            return
+
+        # Extend token cache
+        self.token_cache.extend(value.tolist())
+
+        # Decode the current cache
+        text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
+
+        # Get the new printable text
+        if self.print_len == 0:
+            printable_text = text
         else:
-            token_id = int(value)
-        decoded = self.tokenizer.decode(token_id)
-        self.on_new_token(decoded)
+            printable_text = text[self.print_len:]
+
+        # Update print_len to the length of the decoded text (in characters)
+        self.print_len = len(text)
+
+        # Emit the new text chunk
+        if printable_text:
+            self.new_token.emit(printable_text)
 
     def end(self):
-        pass
+        """Finalize and emit any remaining text."""
+        text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
+        printable_text = text[self.print_len:]
+        if printable_text:
+            self.new_token.emit(printable_text)
+        self.next_tokens_are_prompt = True
+        self.token_cache = []
+        self.print_len = 0
 
 class GenerationWorker(QThread):
     generation_complete = pyqtSignal(str) # Still needed for the full response
@@ -74,7 +104,7 @@ class GenerationWorker(QThread):
         self.tokenizer = tokenizer
         self.conversation_history = conversation_history
         self.settings = settings
-        self.streamer = PyQtStreamer(tokenizer)
+        self.streamer = PyQtStreamer(self.tokenizer, skip_prompt=True)  # Enable skip_prompt if desired
         self.streamer.new_token.connect(self.new_token) # Forward the signal
 
     def run(self):
