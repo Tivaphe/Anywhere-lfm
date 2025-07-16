@@ -195,7 +195,7 @@ class LiquidAIApp(QWidget):
         left_layout.addWidget(new_chat_button)
         left_layout.addWidget(self.history_list)
 
-  def show_conversation_context_menu(self, position):
+    def show_conversation_context_menu(self, position):
         # Récupérer l'élément sur lequel l'utilisateur a cliqué
         item = self.history_list.itemAt(position)
         if not item:
