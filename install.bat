@@ -46,6 +46,5 @@ echo #            Installation terminée !                            #
 echo #                                                               #
 echo #################################################################
 echo.
-echo Vous pouvez maintenant lancer l'application en exécutant run.bat
-echo.
-pause
+echo Lancement de l'application...
+call run.bat
