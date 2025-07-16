@@ -167,9 +167,9 @@ class LiquidAIApp(QWidget):
 
         self.init_ui()
       
-        self.refresh_model_list()
         self.load_conversations()
         self.start_new_conversation()
+        self.refresh_model_list()
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
