@@ -165,7 +165,6 @@ class LiquidAIApp(QWidget):
         os.makedirs(self.rag_documents_path, exist_ok=True)
         self.current_assistant_message = ""
 
-
         self.init_ui()
         self.check_device()
         self.refresh_model_list()
@@ -213,7 +212,6 @@ class LiquidAIApp(QWidget):
         # Si l'utilisateur a cliqué sur "Supprimer"
         if action == delete_action:
             self.delete_conversation(item)
-
 
     def delete_conversation(self, item):
         # Récupérer l'ID de la conversation à partir de l'élément de la liste
