@@ -22,7 +22,7 @@ if %errorlevel% neq 0 (
     pause
     exit
 )
-echo Prérequis OK.
+echo Prerequis OK.
 
 REM Creer un environnement virtuel
 if not exist venv (
@@ -43,7 +43,7 @@ REM Telecharger les paquets dans le dossier local
 echo Telechargement des dependances dans le cache local...
 pip download -r requirements.txt -d local_packages
 
-REM Mettre à jour pip et installer les dépendances depuis le cache local
+REM Mettre à jour pip et installer les dependances depuis le cache local
 echo Installation des dependances depuis le cache local...
 pip install --upgrade pip
 pip install --no-index --find-links=local_packages -r requirements.txt
