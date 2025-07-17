@@ -300,9 +300,7 @@ class LiquidAIApp(QWidget):
 
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
-        self.check_device()
 
-    # ... (le reste du code sera ajouté dans les prochaines étapes)
     def check_device(self):
         device = f"GPU: {torch.cuda.get_device_name(0)}" if torch.cuda.is_available() else "CPU"
         self.chat_area.append(f"<i>Utilisation de l'appareil : {device}</i>")
