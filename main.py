@@ -167,8 +167,8 @@ class LiquidAIApp(QWidget):
 
         self.init_ui()
         self.load_conversations()
-        self.refresh_model_list()
         self.check_device()
+        self.refresh_model_list()
         if not self.conversations:
             self.start_new_conversation()
         else:
