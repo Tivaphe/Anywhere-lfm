@@ -166,10 +166,15 @@ class LiquidAIApp(QWidget):
         self.current_assistant_message = ""
 
         self.init_ui()
-      
         self.load_conversations()
-        self.start_new_conversation()
         self.refresh_model_list()
+        self.check_device()
+        if not self.conversations:
+            self.start_new_conversation()
+        else:
+            self.history_list.setCurrentRow(0)
+            self.load_selected_conversation(self.history_list.item(0))
+
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -179,7 +184,7 @@ class LiquidAIApp(QWidget):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.history_list = QListWidget()
+        self.history_list = QListWidget(left_panel)
         self.history_list.itemClicked.connect(self.load_selected_conversation)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
