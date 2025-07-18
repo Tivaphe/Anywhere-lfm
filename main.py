@@ -366,13 +366,21 @@ class LiquidAIApp(QWidget):
         self.chat_area.append("<i>L'IA réfléchi...</i>")
         self.set_ui_enabled(False)
 
-        conversation_history = list(self.conversations[self.current_conversation_id])
+        # Extraire uniquement la liste des messages de la conversation
+        conversation_messages = list(self.conversations[self.current_conversation_id].get("messages", []))
+
         if rag_context:
-            conversation_history[-1]["content"] = f"{rag_context}\n\nQuestion: {user_message}"
+            # Créer une copie pour éviter de modifier l'historique original
+            conversation_messages_with_rag = list(conversation_messages)
+            conversation_messages_with_rag[-1] = conversation_messages_with_rag[-1].copy()
+            conversation_messages_with_rag[-1]["content"] = f"{rag_context}\n\nQuestion: {user_message}"
+            history_to_send = conversation_messages_with_rag
+        else:
+            history_to_send = conversation_messages
 
         self.current_assistant_message = ""
         self.stats_label.setText("")
-        self.generation_worker = GenerationWorker(self.model, self.tokenizer, conversation_history, self.settings)
+        self.generation_worker = GenerationWorker(self.model, self.tokenizer, history_to_send, self.settings)
         self.generation_worker.new_token.connect(self.on_new_token)
         self.generation_worker.generation_complete.connect(self.on_generation_complete)
         self.generation_worker.stats.connect(self.on_stats_update)
@@ -398,7 +406,7 @@ class LiquidAIApp(QWidget):
         self.stats_label.setText(f"{tokens_per_sec:.2f} tokens/s")
 
     def on_generation_complete(self, response):
-        self.conversations[self.current_conversation_id].append({"role": "assistant", "content": response})
+        self.conversations[self.current_conversation_id]["messages"].append({"role": "assistant", "content": response})
         self.save_conversations()
         self.display_current_conversation()
         self.set_ui_enabled(True)
