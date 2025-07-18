@@ -173,6 +173,8 @@ class LiquidAIApp(QWidget):
 
         self.history_list = QListWidget(left_panel)
         self.history_list.itemClicked.connect(self.load_selected_conversation)
+        self.history_list.itemDoubleClicked.connect(self.rename_conversation_item)
+        self.history_list.itemChanged.connect(self.on_conversation_renamed)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
         left_layout.addWidget(self.history_list)
@@ -484,13 +486,28 @@ class LiquidAIApp(QWidget):
             self.vector_store = None
             self.rag_toggle_checkbox.setEnabled(False)
 
+    def rename_conversation_item(self, item):
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self.history_list.editItem(item)
+
+    def on_conversation_renamed(self, item):
+        conv_id = item.data(Qt.ItemDataRole.UserRole)
+        if conv_id in self.conversations:
+            new_title = item.text()
+            self.conversations[conv_id]["title"] = new_title
+            self.save_conversations()
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+
     def start_new_conversation(self):
         self.current_conversation_id = str(uuid.uuid4())
-        self.conversations[self.current_conversation_id] = [
-            {"role": "system", "content": self.settings["system_prompt"]}
-        ]
+        new_title = f"Discussion du {time.strftime('%Y-%m-%d %H:%M')}"
+        self.conversations[self.current_conversation_id] = {
+            "title": new_title,
+            "messages": [{"role": "system", "content": self.settings["system_prompt"]}]
+        }
 
-        item = QListWidgetItem(f"Nouvelle Discussion - {self.current_conversation_id[:8]}")
+        item = QListWidgetItem(new_title)
         item.setData(Qt.ItemDataRole.UserRole, self.current_conversation_id)
         self.history_list.insertItem(0, item)
         self.history_list.setCurrentItem(item)
@@ -512,35 +529,50 @@ class LiquidAIApp(QWidget):
 
         if not self.current_conversation_id: return
 
-        history = self.conversations.get(self.current_conversation_id, [])
+        conversation_data = self.conversations.get(self.current_conversation_id, {})
+        history = conversation_data.get("messages", [])
+
+        # Afficher le message système en premier s'il existe
+        system_prompt = next((msg["content"] for msg in history if msg["role"] == "system"), None)
+        if system_prompt:
+             self.append_message("system", "Prompt système : " + system_prompt, save=False)
+
         for message in history:
-            self.append_message(message["role"], message["content"], save=False)
+             if message["role"] != "system":
+                self.append_message(message["role"], message["content"], save=False)
 
     def append_message(self, role, content, save=True):
         if not self.current_conversation_id: return
 
         if save:
-            self.conversations[self.current_conversation_id].append({"role": role, "content": content})
+            # Assurez-vous que la conversation a une structure pour stocker les messages
+            if "messages" not in self.conversations[self.current_conversation_id]:
+                self.conversations[self.current_conversation_id]["messages"] = []
+            self.conversations[self.current_conversation_id]["messages"].append({"role": role, "content": content})
+
 
         if role == "user":
+            # Alignement à droite pour l'utilisateur
             html = f"""
-            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
-                <b>Vous:</b>
-                <p style='margin: 0;'>{content}</p>
+            <div style='margin-left: 50px; margin-right: 5px; background-color: #2b5278; padding: 10px; border-radius: 10px; margin-bottom: 5px;'>
+                <p style='color: white; margin: 0;'>{content}</p>
             </div>
             """
         elif role == "assistant":
+            # Alignement à gauche pour l'IA
             formatted_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
             html = f"""
-            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
-                <b>LiquidAI:</b>
-                {formatted_content}
+            <div style='margin-right: 50px; margin-left: 5px; background-color: #3a3a3a; padding: 10px; border-radius: 10px; margin-bottom: 5px;'>
+                <b style='color: #e0e0e0;'>LiquidAI:</b>
+                <div style='color: white;'>{formatted_content}</div>
             </div>
             """
-        else:
-            html = f"<i>{content}</i>"
+        else: # system messages
+            html = f"<div style='text-align: center; color: grey; margin-bottom: 5px;'><i>{content}</i></div>"
 
         self.chat_area.append(html)
+        self.chat_area.verticalScrollBar().setValue(self.chat_area.verticalScrollBar().maximum())
+
 
         if save:
             self.save_conversations()
@@ -555,21 +587,40 @@ class LiquidAIApp(QWidget):
         if not os.path.exists("conversations"):
             return
 
-        for filename in os.listdir("conversations"):
-            if filename.endswith(".json"):
-                conv_id = filename.replace(".json", "")
-                with open(f"conversations/{filename}", "r", encoding="utf-8") as f:
-                    self.conversations[conv_id] = json.load(f)
+        sorted_files = sorted(
+            [f for f in os.listdir("conversations") if f.endswith(".json")],
+            key=lambda x: os.path.getmtime(os.path.join("conversations", x)),
+            reverse=True
+        )
 
-                title = f"Discussion {conv_id[:8]}"
-                for msg in self.conversations[conv_id]:
-                    if msg['role'] == 'user':
-                        title = msg['content'][:30] + "..."
-                        break
+        for filename in sorted_files:
+            conv_id = filename.replace(".json", "")
+            try:
+                with open(f"conversations/{filename}", "r", encoding="utf-8") as f:
+                    conv_data = json.load(f)
+                    self.conversations[conv_id] = conv_data
+
+                # Gérer l'ancien et le nouveau format
+                if isinstance(conv_data, list):
+                     # Ancien format: une liste de messages
+                    title = f"Ancienne Discussion {conv_id[:8]}"
+                    user_message = next((msg['content'] for msg in conv_data if msg['role'] == 'user'), None)
+                    if user_message:
+                        title = user_message[:30] + "..."
+                    self.conversations[conv_id] = {
+                        "title": title,
+                        "messages": conv_data
+                    }
+                else:
+                    # Nouveau format: un dictionnaire avec "title" et "messages"
+                    title = conv_data.get("title", f"Discussion {conv_id[:8]}")
+
 
                 item = QListWidgetItem(title)
                 item.setData(Qt.ItemDataRole.UserRole, conv_id)
                 self.history_list.addItem(item)
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Erreur de chargement ou format invalide pour {filename}: {e}")
 
 
 if __name__ == "__main__":
