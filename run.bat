@@ -1,8 +1,4 @@
 @echo off
-echo Lancement de l'interface graphique LiquidAI...
-
-REM Activer l'environnement virtuel
-call venv\\Scripts\\activate
-
-REM Lancer l'application principale
-python main.py
+echo Lancement de l'application LiquidAI...
+venv\Scripts\python.exe -m uvicorn api:app --host 0.0.0.0 --port 8000
+pause

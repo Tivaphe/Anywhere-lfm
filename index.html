@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiquidAI Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="scanlines"></div>
+    <div id="app" class="ui-container">
+        <div id="left-panel" class="sidebar">
+            <h1>Liquid Models</h1>
+            <div id="model-controls">
+                <p>Modèle :</p>
+                <select id="model-selector"></select>
+                <button id="eject-button">Ejecter</button>
+                <button id="settings-button">Paramètres</button>
+                <button id="new-chat-button">Nouvelle Discussion</button>
+            </div>
+             <div class="model-info">
+                <h2>Historique</h2>
+                <div id="history-list"></div>
+            </div>
+            <div id="rag-controls-sidebar" class="model-info">
+                 <h2>RAG</h2>
+                <button id="load-docs-button">Charger Documents</button>
+                <input type="file" id="document-upload" multiple hidden>
+                <label>
+                    <input type="checkbox" id="rag-toggle">
+                    Activer RAG
+                </label>
+                <p id="rag-status">RAG : Inactif</p>
+            </div>
+        </div>
+
+        <div id="right-panel" class="chat-area">
+            <div id="chat-area" class="chat-container">
+                <!-- Messages will be injected here by script.js -->
+            </div>
+            <div id="input-area" class="chat-input">
+                <input type="text" id="user-input" placeholder="Posez votre question ici...">
+                <button id="send-button">Envoyer</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Paramètres</h2>
+            <form id="settings-form">
+                <label>Prompt Système:</label>
+                <textarea name="system_prompt" rows="4"></textarea>
+                <label>Température:</label>
+                <input type="number" name="temperature" step="0.1">
+                <label>Min P:</label>
+                <input type="number" name="min_p" step="0.05">
+                <label>Repetition Penalty:</label>
+                <input type="number" name="repetition_penalty" step="0.05">
+                <button type="submit">Sauvegarder</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

@@ -1,7 +1,4 @@
 #!/bin/bash
-
-# Activer l'environnement virtuel
+echo "Lancement de l'application LiquidAI..."
 source venv/bin/activate
-
-# Lancer l'application principale
-python3 main.py
+uvicorn api:app --host 0.0.0.0 --port 8000
