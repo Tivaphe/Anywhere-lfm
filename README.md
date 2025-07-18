@@ -1,109 +1,86 @@
 <img width="1442" height="841" alt="Capture d'écran 2025-07-15 204919" src="https://github.com/user-attachments/assets/885a78a4-9102-4d1c-83fb-607610486a95" />
 
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 
 # Application de Chat LiquidAI avec Transformers
 
-Une application de bureau simple pour discuter avec les modèles LFM2 de LiquidAI, optimisée pour la bibliothèque `transformers`.
+Une application de bureau et une API locale pour interagir avec les modèles LFM2 de LiquidAI, optimisée par la bibliothèque `transformers`.
 
-## ⚠️ Prérequis Important pour les Utilisateurs Windows
+## Fonctionnalités Principales
 
-Pour que l'installation fonctionne, vous **DEVEZ** activer le support des chemins de fichiers longs sur votre système. C'est une opération unique et sans danger.
+- **Interface Graphique Intuitive** : Une application de bureau simple et efficace construite avec PyQt6 pour interagir avec les modèles.
+- **Gestion Dynamique des Modèles** : Chargez et déchargez les modèles de langue à la volée pour libérer les ressources (VRAM/RAM).
+- **Support RAG (Retrieval-Augmented Generation)** : Améliorez les réponses du modèle en lui fournissant le contexte de vos propres documents (`.txt`, `.pdf`, `.docx`).
+- **API Compatible OpenAI** : Exposez le modèle via une API locale qui imite la structure de l'API OpenAI, vous permettant de connecter vos outils et scripts existants.
+- **Streaming de Texte** : Obtenez des réponses en temps réel, mot par mot, pour une expérience plus fluide.
+- **Paramètres Personnalisables** : Ajustez finement les paramètres de génération comme la température, le `min_p` et la pénalité de répétition via une interface dédiée.
+- **Historique des Conversations** : Toutes vos discussions sont sauvegardées localement et peuvent être rechargées.
 
-1.  **Ouvrez l'Éditeur de Stratégie de Groupe** :
-    -   Appuyez sur `Win + R` (la touche Windows et la lettre R en même temps).
-    -   Tapez `gpedit.msc` et appuyez sur Entrée.
-    -   *Si cela ne fonctionne pas (versions Famille de Windows), ouvrez PowerShell en tant qu'administrateur et collez cette commande :*
-        ```powershell
-        New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-        ```
+## Prérequis
 
-2.  **Naviguez dans l'Éditeur de Stratégie** (si `gpedit.msc` a fonctionné) :
-    -   Allez à `Configuration ordinateur > Modèles d'administration > Système > Système de fichiers`.
+- **Python 3.8+**
+- **Git**
 
-3.  **Activez le support** :
-    -   Dans le volet de droite, double-cliquez sur `Activer la prise en charge des chemins d'accès longs Win32`.
-    -   Sélectionnez `Activé` et cliquez sur `OK`.
+### ⚠️ Prérequis Important pour les Utilisateurs Windows
 
-4.  **Redémarrez votre ordinateur**. Cette étape est cruciale pour que le changement soit pris en compte.
+Pour que l'installation des dépendances fonctionne correctement, vous **DEVEZ** activer le support des chemins de fichiers longs sur votre système. C'est une opération unique et sans danger.
+
+1.  **Ouvrez PowerShell en tant qu'administrateur** et exécutez la commande suivante :
+    ```powershell
+    New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+    ```
+2.  **Redémarrez votre ordinateur**. C'est une étape cruciale pour que le changement soit pris en compte.
 
 ## Installation
 
-### Autres Prérequis
-
--   **Python 3.8+**
--   **Git**
-
-### Instructions d'Installation
-
-L'installation est conçue pour être aussi simple que possible et pour optimiser les lancements futurs.
+Les scripts d'installation créent un environnement virtuel et installent toutes les dépendances nécessaires.
 
 #### Pour Windows
 
-1.  **Première fois uniquement :**
-    *   Assurez-vous d'avoir suivi le prérequis important ci-dessus (activation des chemins longs).
-    *   Double-cliquez sur `install.bat`.
-    *   Ce script va :
-        1.  Créer un environnement virtuel Python (`venv`).
-        2.  Télécharger toutes les dépendances nécessaires dans un dossier local `local_packages`.
-        3.  Installer ces dépendances depuis le dossier local.
-    *   L'application démarrera automatiquement à la fin de l'installation.
-
-2.  **Les fois suivantes :**
-    *   Double-cliquez simplement sur `run.bat` pour lancer l'application. Le démarrage sera beaucoup plus rapide.
+1.  **Première fois :** Double-cliquez sur `install.bat`. L'application se lancera automatiquement après l'installation.
+2.  **Les fois suivantes :** Double-cliquez sur `run.bat` pour un démarrage rapide.
 
 #### Pour macOS et Linux
 
-1.  **Première fois uniquement :**
+1.  **Première fois :**
     *   Rendez les scripts exécutables : `chmod +x install.sh run.sh run_api.sh`.
-    *   Exécutez le script d'installation : `./install.sh`.
-    *   L'application démarrera automatiquement à la fin de l'installation.
+    *   Exécutez le script d'installation : `./install.sh`. L'application se lancera automatiquement.
+2.  **Les fois suivantes :** Exécutez `./run.sh`.
 
-2.  **Les fois suivantes :**
-    *   Exécutez simplement `./run.sh` pour lancer l'application.
+## Comment Utiliser
 
-## Deux Modes d'Utilisation
+Ce projet offre deux modes d'utilisation principaux : une interface de bureau et une API.
 
-Ce projet peut être utilisé de deux manières : via une interface graphique de bureau, ou via une API compatible avec OpenAI.
+### 1. Interface Graphique de Bureau (GUI)
 
-### 1. Interface Graphique de Bureau
+Lancez l'application en utilisant `run.bat` (Windows) ou `./run.sh` (macOS/Linux).
 
-#### Lancement
--   **Windows** : Double-cliquez sur `run.bat`.
--   **macOS / Linux** : Exécutez `./run.sh`.
+- **Panneau de Gauche (Historique)** :
+  - Affiche toutes vos conversations passées.
+  - Cliquez sur "Nouvelle Discussion" pour en commencer une nouvelle.
+  - Faites un clic droit sur une conversation pour la supprimer.
 
-#### Utilisation
-1.  **Lancez l'application**.
-2.  **Sélectionnez un modèle** dans la liste.
-3.  **(Optionnel) Paramètres** : Cliquez sur "Paramètres" pour ajuster le prompt système et les options de génération.
-4.  **Discutez** !
+- **Panneau de Droite (Chat)** :
+  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante. L'application le téléchargera (si nécessaire) et le chargera en mémoire.
+  - **Éjecter le Modèle** : Cliquez sur ce bouton pour décharger le modèle de la VRAM/RAM et libérer les ressources.
+  - **Paramètres** : Ouvre une fenêtre pour ajuster le *prompt système*, la *température*, le *min_p*, et d'autres options de génération.
+  - **Zone de Chat** : Affiche la conversation en cours.
+  - **Champ de Saisie** : Tapez votre message et appuyez sur Entrée ou cliquez sur "Envoyer".
 
-### 3. Fonctionnalité RAG (Retrieval-Augmented Generation)
+### 2. Fonctionnalité RAG (Retrieval-Augmented Generation)
 
-LiquidAI inclut une fonctionnalité RAG qui permet au modèle d'utiliser le contenu de vos documents pour répondre à vos questions.
-
-#### Comment ça marche ?
+La fonctionnalité RAG permet au modèle de répondre à des questions sur des informations contenues dans vos documents personnels.
 
 1.  **Charger des documents** : Cliquez sur le bouton "Charger Documents" pour sélectionner un ou plusieurs fichiers (`.txt`, `.pdf`, `.docx`).
-2.  **Création de l'index** : L'application traite ces documents, les découpe en petits morceaux (chunks), et les transforme en vecteurs numériques à l'aide d'un modèle d'embedding local (`all-MiniLM-L6-v2`). Ces vecteurs sont stockés dans un index local (FAISS).
+2.  **Création de l'index** : L'application traite ces documents, les découpe en morceaux, et les transforme en vecteurs numériques à l'aide d'un modèle d'embedding local. Ces vecteurs sont stockés dans un index en mémoire (FAISS).
 3.  **Activer le RAG** : Cochez la case "Activer RAG".
-4.  **Poser une question** : Lorsque vous posez une question, l'application recherche les morceaux de documents les plus pertinents dans l'index et les injecte dans le contexte de votre question avant de l'envoyer au modèle LFM2.
+4.  **Posez votre question** : Lorsque le RAG est actif, l'application recherche les morceaux de documents les plus pertinents et les injecte dans le contexte avant d'interroger le modèle.
 
-Cela permet au modèle de répondre à des questions sur des sujets spécifiques contenus dans vos documents, même s'il n'a pas été entraîné sur ces données.
+### 3. API Compatible OpenAI
 
-### 2. API Compatible OpenAI
+Lancez le serveur d'API avec `run_api.bat` (Windows) ou `./run_api.sh` (macOS/Linux). Le serveur démarrera sur `http://localhost:8000`.
 
-#### Lancement
--   **Windows** : Double-cliquez sur `run_api.bat`.
--   **macOS / Linux** : Exécutez `./run_api.sh`.
-
-Le serveur démarrera sur `http://localhost:8000`.
-
-#### Utilisation
-
-Vous pouvez maintenant utiliser ce serveur comme un remplacement direct de l'API OpenAI dans vos outils et scripts. Le point de terminaison principal est `/v1/chat/completions`.
+Vous pouvez maintenant utiliser cette URL dans n'importe quel client ou bibliothèque compatible avec l'API OpenAI.
 
 **Exemple avec `curl` :**
 
@@ -114,7 +91,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   "model": "LiquidAI/LFM2-350M",
   "messages": [
     {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "What is C. elegans?"}
+    {"role": "user", "content": "Explique le concept de RAG en une phrase."}
   ]
 }'
 ```
@@ -132,10 +109,20 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "C. elegans, or Caenorhabditis elegans, is a type of nematode worm..."
+        "content": "Le RAG (Retrieval-Augmented Generation) est une technique où un modèle de langue récupère des informations pertinentes dans une base de connaissances externe avant de générer une réponse."
       },
       "finish_reason": "stop"
     }
   ]
 }
 ```
+
+## Dépendances
+
+Les dépendances sont listées dans le fichier `requirements.txt` et sont installées automatiquement. Les principales bibliothèques utilisées sont :
+
+- **GUI** : `PyQt6`
+- **Modèles IA** : `transformers`, `torch`, `accelerate`
+- **API** : `fastapi`, `uvicorn`
+- **RAG** : `langchain`, `langchain-community`, `sentence-transformers`, `faiss-cpu`, `pypdf`, `python-docx`
+- **Autres** : `markdown2`
