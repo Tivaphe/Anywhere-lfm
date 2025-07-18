@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import uuid
+import copy
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QLineEdit, QPushButton, QComboBox, QLabel, QMenu,
                              QHBoxLayout, QSplitter, QListWidget, QListWidgetItem,
@@ -173,8 +174,6 @@ class LiquidAIApp(QWidget):
 
         self.history_list = QListWidget(left_panel)
         self.history_list.itemClicked.connect(self.load_selected_conversation)
-        self.history_list.itemDoubleClicked.connect(self.rename_conversation_item)
-        self.history_list.itemChanged.connect(self.on_conversation_renamed)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_context_menu)
         left_layout.addWidget(self.history_list)
@@ -366,8 +365,8 @@ class LiquidAIApp(QWidget):
         self.chat_area.append("<i>L'IA réfléchi...</i>")
         self.set_ui_enabled(False)
 
-        # Extraire uniquement la liste des messages de la conversation
-        conversation_messages = list(self.conversations[self.current_conversation_id].get("messages", []))
+        # La conversation est maintenant une liste de messages
+        conversation_messages = list(self.conversations[self.current_conversation_id])
 
         if rag_context:
             # Créer une copie pour éviter de modifier l'historique original
@@ -406,7 +405,7 @@ class LiquidAIApp(QWidget):
         self.stats_label.setText(f"{tokens_per_sec:.2f} tokens/s")
 
     def on_generation_complete(self, response):
-        self.conversations[self.current_conversation_id]["messages"].append({"role": "assistant", "content": response})
+        self.conversations[self.current_conversation_id].append({"role": "assistant", "content": response})
         self.save_conversations()
         self.display_current_conversation()
         self.set_ui_enabled(True)
@@ -494,28 +493,13 @@ class LiquidAIApp(QWidget):
             self.vector_store = None
             self.rag_toggle_checkbox.setEnabled(False)
 
-    def rename_conversation_item(self, item):
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-        self.history_list.editItem(item)
-
-    def on_conversation_renamed(self, item):
-        conv_id = item.data(Qt.ItemDataRole.UserRole)
-        if conv_id in self.conversations:
-            new_title = item.text()
-            self.conversations[conv_id]["title"] = new_title
-            self.save_conversations()
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-
     def start_new_conversation(self):
         self.current_conversation_id = str(uuid.uuid4())
-        new_title = f"Discussion du {time.strftime('%Y-%m-%d %H:%M')}"
-        self.conversations[self.current_conversation_id] = {
-            "title": new_title,
-            "messages": [{"role": "system", "content": self.settings["system_prompt"]}]
-        }
+        self.conversations[self.current_conversation_id] = [
+            {"role": "system", "content": self.settings["system_prompt"]}
+        ]
 
-        item = QListWidgetItem(new_title)
+        item = QListWidgetItem(f"Nouvelle Discussion - {self.current_conversation_id[:8]}")
         item.setData(Qt.ItemDataRole.UserRole, self.current_conversation_id)
         self.history_list.insertItem(0, item)
         self.history_list.setCurrentItem(item)
@@ -537,27 +521,15 @@ class LiquidAIApp(QWidget):
 
         if not self.current_conversation_id: return
 
-        conversation_data = self.conversations.get(self.current_conversation_id, {})
-        history = conversation_data.get("messages", [])
-
-        # Afficher le message système en premier s'il existe
-        system_prompt = next((msg["content"] for msg in history if msg["role"] == "system"), None)
-        if system_prompt:
-             self.append_message("system", "Prompt système : " + system_prompt, save=False)
-
+        history = self.conversations.get(self.current_conversation_id, [])
         for message in history:
-             if message["role"] != "system":
-                self.append_message(message["role"], message["content"], save=False)
+            self.append_message(message["role"], message["content"], save=False)
 
     def append_message(self, role, content, save=True):
         if not self.current_conversation_id: return
 
         if save:
-            # Assurez-vous que la conversation a une structure pour stocker les messages
-            if "messages" not in self.conversations[self.current_conversation_id]:
-                self.conversations[self.current_conversation_id]["messages"] = []
-            self.conversations[self.current_conversation_id]["messages"].append({"role": role, "content": content})
-
+            self.conversations[self.current_conversation_id].append({"role": role, "content": content})
 
         if role == "user":
             # Alignement à droite pour l'utilisateur
@@ -591,44 +563,38 @@ class LiquidAIApp(QWidget):
             with open(f"conversations/{conv_id}.json", "w", encoding="utf-8") as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
 
+
     def load_conversations(self):
         if not os.path.exists("conversations"):
             return
 
-        sorted_files = sorted(
-            [f for f in os.listdir("conversations") if f.endswith(".json")],
-            key=lambda x: os.path.getmtime(os.path.join("conversations", x)),
-            reverse=True
-        )
+        for filename in os.listdir("conversations"):
+            if filename.endswith(".json"):
+                conv_id = filename.replace(".json", "")
+                file_path = os.path.join("conversations", filename)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        # Ignorer les fichiers vides
+                        if os.path.getsize(file_path) == 0:
+                            print(f"Avertissement : Le fichier de conversation '{filename}' est vide et sera ignoré.")
+                            continue
+                        history = json.load(f)
+                        self.conversations[conv_id] = history
 
-        for filename in sorted_files:
-            conv_id = filename.replace(".json", "")
-            try:
-                with open(f"conversations/{filename}", "r", encoding="utf-8") as f:
-                    conv_data = json.load(f)
-                    self.conversations[conv_id] = conv_data
+                    title = f"Discussion {conv_id[:8]}"
+                    if isinstance(history, list) and history:
+                         user_message = next((msg.get('content') for msg in history if msg.get('role') == 'user'), None)
+                         if user_message:
+                            title = user_message[:30] + "..."
 
-                # Gérer l'ancien et le nouveau format
-                if isinstance(conv_data, list):
-                     # Ancien format: une liste de messages
-                    title = f"Ancienne Discussion {conv_id[:8]}"
-                    user_message = next((msg['content'] for msg in conv_data if msg['role'] == 'user'), None)
-                    if user_message:
-                        title = user_message[:30] + "..."
-                    self.conversations[conv_id] = {
-                        "title": title,
-                        "messages": conv_data
-                    }
-                else:
-                    # Nouveau format: un dictionnaire avec "title" et "messages"
-                    title = conv_data.get("title", f"Discussion {conv_id[:8]}")
+                    item = QListWidgetItem(title)
+                    item.setData(Qt.ItemDataRole.UserRole, conv_id)
+                    self.history_list.addItem(item)
 
-
-                item = QListWidgetItem(title)
-                item.setData(Qt.ItemDataRole.UserRole, conv_id)
-                self.history_list.addItem(item)
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"Erreur de chargement ou format invalide pour {filename}: {e}")
+                except json.JSONDecodeError:
+                    print(f"Erreur : Le fichier de conversation '{filename}' est corrompu ou mal formaté. Il sera ignoré.")
+                except Exception as e:
+                    print(f"Erreur inattendue lors du chargement de '{filename}': {e}")
 
 
 if __name__ == "__main__":

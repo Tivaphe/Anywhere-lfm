@@ -1,0 +1,7 @@
+{
+    "title": "Fichier corrompu",
+    "messages": [
+        {"role": "user", "content": "Ceci est un test"},
+        {"role": "assistant", "content": "Ceci est une réponse"
+    ]
+}
