@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFM2 Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-box"></div>
+        <div id="input-container">
+            <select id="model-select">
+                <option value="1.2B">LFM2 1.2B</option>
+                <option value="700M">LFM2 700M</option>
+                <option value="350M">LFM2 350M</option>
+            </select>
+            <input type="text" id="user-input" placeholder="Écrivez votre message...">
+            <button id="send-button">Envoyer</button>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+@echo off
+echo Lancement de l'application...
+python app/main.py
