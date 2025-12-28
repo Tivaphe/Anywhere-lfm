@@ -14,6 +14,7 @@ from transformers.image_utils import load_image
 import torch
 import time
 import markdown2
+import traceback
 
 # RAG specific imports
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
@@ -152,7 +153,7 @@ class GenerationWorker(QThread):
                 ).to(self.model.device)
 
                 generation_kwargs = dict(
-                    input_ids=inputs,
+                    **inputs,
                     streamer=self.streamer,
                     max_new_tokens=512,
                     do_sample=True,
@@ -179,7 +180,8 @@ class GenerationWorker(QThread):
             self.generation_complete.emit(result)
 
         except Exception as e:
-            self.error.emit(f"Erreur de génération : {e}")
+            tb = traceback.format_exc()
+            self.error.emit(f"Erreur de génération : {e}\n\nTraceback:\n{tb}")
 
 # --- Application Principale ---
 
