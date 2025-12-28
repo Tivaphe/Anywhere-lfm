@@ -34,17 +34,29 @@ class ModelWorker(QThread):
         self.model_name = model_name
     def run(self):
         try:
+            # Créer un dossier pour le offloading si nécessaire
+            offload_folder = "./offload"
+            os.makedirs(offload_folder, exist_ok=True)
+
             is_vl_model = "VL" in self.model_name
             if is_vl_model:
                 processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
                 model = AutoModelForImageTextToText.from_pretrained(
-                    self.model_name, trust_remote_code=True, device_map="auto", torch_dtype=torch.bfloat16
+                    self.model_name,
+                    trust_remote_code=True,
+                    device_map="auto",
+                    torch_dtype=torch.bfloat16,
+                    offload_folder=offload_folder
                 )
                 self.model_loaded.emit(model, processor)
             else:
                 tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
                 model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name, trust_remote_code=True, device_map="auto", torch_dtype="auto"
+                    self.model_name,
+                    trust_remote_code=True,
+                    device_map="auto",
+                    torch_dtype="auto",
+                    offload_folder=offload_folder
                 )
                 self.model_loaded.emit(model, tokenizer)
         except Exception as e:
@@ -153,7 +165,7 @@ class GenerationWorker(QThread):
                 ).to(self.model.device)
 
                 generation_kwargs = dict(
-                    **inputs,
+                    input_ids=inputs,
                     streamer=self.streamer,
                     max_new_tokens=512,
                     do_sample=True,
