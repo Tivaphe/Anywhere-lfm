@@ -33,40 +33,71 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: List[ChatCompletionResponseChoice]
 
-# --- Initialisation de l'application et du modèle ---
+# --- Gestion dynamique des modèles ---
 
-print("Initialisation de l'API et chargement du modèle...")
+# Cache pour les modèles chargés (pour éviter de recharger depuis le disque)
+model_cache = {}
 
-# Modèle par défaut au démarrage
-DEFAULT_MODEL = "LiquidAI/LFM2-350M"
+# Liste des modèles autorisés pour le chargement
+SUPPORTED_MODELS = [
+    "LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B",
+    "LiquidAI/LFM2-8B-A1B", "LiquidAI/LFM2-2.6B", "LiquidAI/LFM2-2.6B-Exp",
+    "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-350M-Extract",
+    "LiquidAI/LFM2-1.2B-RAG", "LiquidAI/LFM2-1.2B-Tool", "LiquidAI/LFM2-350M-Math"
+]
 
-try:
-    tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        DEFAULT_MODEL,
-        trust_remote_code=True,
-        device_map="auto",
-        torch_dtype="auto"
-    )
-    print(f"Modèle par défaut '{DEFAULT_MODEL}' chargé avec succès.")
-except Exception as e:
-    print(f"ERREUR CRITIQUE : Impossible de charger le modèle par défaut. L'API ne pourra pas fonctionner. Erreur : {e}")
-    model = None
-    tokenizer = None
+def get_model(model_name: str):
+    """
+    Charge un modèle et son tokenizer, en utilisant un cache pour éviter les rechargements.
+    """
+    if model_name not in SUPPORTED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Modèle non supporté. Les modèles disponibles sont : {', '.join(SUPPORTED_MODELS)}")
+
+    # Si le modèle est déjà dans le cache, on le retourne
+    if model_name in model_cache:
+        return model_cache[model_name]
+
+    # Sinon, on le charge
+    print(f"Chargement du modèle '{model_name}'...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            device_map="auto",
+            torch_dtype="auto"
+        )
+        model_cache[model_name] = (model, tokenizer)
+        print(f"Modèle '{model_name}' chargé et mis en cache.")
+        return model, tokenizer
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du chargement du modèle '{model_name}': {e}")
 
 app = FastAPI()
+
+# Pré-chargement du modèle par défaut pour accélérer le premier appel (optionnel)
+DEFAULT_MODEL = "LiquidAI/LFM2-1.2B"
+@app.on_event("startup")
+async def startup_event():
+    print("Démarrage de l'API et pré-chargement du modèle par défaut...")
+    try:
+        get_model(DEFAULT_MODEL)
+    except Exception as e:
+        print(f"AVERTISSEMENT : Impossible de pré-charger le modèle par défaut '{DEFAULT_MODEL}'. L'API démarrera sans modèle pré-chargé. Erreur : {e}")
 
 # --- Endpoint de l'API ---
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def create_chat_completion(request: ChatCompletionRequest):
-    if not model or not tokenizer:
-        raise HTTPException(status_code=503, detail="Le modèle n'est pas disponible ou n'a pas pu être chargé.")
-
-    if request.model != DEFAULT_MODEL:
-         # Pour l'instant, on ne supporte qu'un seul modèle chargé à la fois.
-         # On pourrait ajouter une logique pour charger dynamiquement d'autres modèles ici.
-        raise HTTPException(status_code=400, detail=f"Modèle non supporté. Seul le modèle '{DEFAULT_MODEL}' est actuellement chargé.")
+    # Charger dynamiquement le modèle demandé
+    try:
+        model, tokenizer = get_model(request.model)
+    except HTTPException as e:
+        # Propage l'exception HTTP si le modèle n'est pas supporté ou ne peut pas être chargé
+        raise e
+    except Exception as e:
+        # Gère les autres erreurs potentielles
+        raise HTTPException(status_code=500, detail=f"Erreur interne du serveur : {e}")
 
     if request.stream:
         raise HTTPException(status_code=400, detail="Le streaming n'est pas encore implémenté.")
@@ -114,7 +145,12 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
 @app.get("/")
 def read_root():
-    return {"status": "Le serveur de l'API LiquidAI est en ligne.", "model_loaded": DEFAULT_MODEL if model else "Aucun"}
+    loaded_models = list(model_cache.keys())
+    return {
+        "status": "Le serveur de l'API LiquidAI est en ligne.",
+        "models_available": SUPPORTED_MODELS,
+        "models_loaded_in_cache": loaded_models if loaded_models else "Aucun"
+    }
 
 if __name__ == "__main__":
     # Lancer le serveur

@@ -287,7 +287,12 @@ class LiquidAIApp(QWidget):
     def refresh_model_list(self):
         self.model_selector.blockSignals(True)
         self.model_selector.clear()
-        huggingface_models = ["LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B"]
+        huggingface_models = [
+            "LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B",
+            "LiquidAI/LFM2-8B-A1B", "LiquidAI/LFM2-2.6B", "LiquidAI/LFM2-2.6B-Exp",
+            "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-350M-Extract",
+            "LiquidAI/LFM2-1.2B-RAG", "LiquidAI/LFM2-1.2B-Tool", "LiquidAI/LFM2-350M-Math"
+        ]
         self.model_selector.addItems(huggingface_models)
         self.model_selector.blockSignals(False)
         self.on_model_change(self.model_selector.currentText())
