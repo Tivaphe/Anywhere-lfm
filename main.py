@@ -7,7 +7,10 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
                              QHBoxLayout, QSplitter, QListWidget, QListWidgetItem,
                              QFileDialog, QCheckBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt, QObject
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, TextStreamer
+from PyQt6.QtGui import QPixmap
+from transformers import (AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, TextStreamer,
+                          AutoProcessor, AutoModelForImageTextToText)
+from transformers.image_utils import load_image
 import torch
 import time
 import markdown2
@@ -30,11 +33,19 @@ class ModelWorker(QThread):
         self.model_name = model_name
     def run(self):
         try:
-            tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, trust_remote_code=True, device_map="auto", torch_dtype="auto"
-            )
-            self.model_loaded.emit(model, tokenizer)
+            is_vl_model = "VL" in self.model_name
+            if is_vl_model:
+                processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                model = AutoModelForImageTextToText.from_pretrained(
+                    self.model_name, trust_remote_code=True, device_map="auto", torch_dtype=torch.bfloat16
+                )
+                self.model_loaded.emit(model, processor)
+            else:
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name, trust_remote_code=True, device_map="auto", torch_dtype="auto"
+                )
+                self.model_loaded.emit(model, tokenizer)
         except Exception as e:
             self.error.emit(f"Erreur Transformers : {e}")
 
@@ -86,38 +97,80 @@ class GenerationWorker(QThread):
     error = pyqtSignal(str)
     stats = pyqtSignal(float)
 
-    def __init__(self, model, tokenizer, conversation_history, settings):
+    def __init__(self, model, processor, conversation_history, settings, image_path=None):
         super().__init__()
         self.model = model
-        self.tokenizer = tokenizer
+        self.processor = processor # Can be a tokenizer or a processor
         self.conversation_history = conversation_history
         self.settings = settings
-        self.streamer = PyQtStreamer(self.tokenizer, skip_prompt=True)
-        self.streamer.new_token.connect(self.new_token)
+        self.image_path = image_path
+        self.is_vl_model = "VL" in model.config._name_or_path
+
+        # Streaming is only enabled for non-VL models for now
+        if not self.is_vl_model:
+            self.streamer = PyQtStreamer(self.processor, skip_prompt=True)
+            self.streamer.new_token.connect(self.new_token)
+        else:
+            self.streamer = None
 
     def run(self):
         try:
-            input_ids = self.tokenizer.apply_chat_template(
-                self.conversation_history, add_generation_prompt=True, return_tensors="pt"
-            ).to(self.model.device)
+            if self.is_vl_model:
+                # --- VL Model Generation ---
+                image = load_image(self.image_path)
 
-            generation_kwargs = dict(
-                input_ids=input_ids,
-                streamer=self.streamer,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=self.settings["temperature"],
-                top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
-                repetition_penalty=self.settings["repetition_penalty"]
-            )
+                # Le processeur attend une conversation où le dernier message utilisateur contient l'image et le texte
+                vl_conversation = self.conversation_history[:-1] # Historique sans le dernier message
+                last_user_message = self.conversation_history[-1]
+
+                content = [{"type": "image", "image": image}]
+                if last_user_message['content']: # Ajoute le texte s'il y en a
+                    content.append({"type": "text", "text": last_user_message['content']})
+
+                vl_conversation.append({
+                    "role": "user",
+                    "content": content
+                })
+
+                inputs = self.processor.apply_chat_template(
+                    vl_conversation, add_generation_prompt=True, return_tensors="pt"
+                ).to(self.model.device)
+
+                generation_kwargs = dict(
+                    **inputs,
+                    max_new_tokens=512,
+                    do_sample=True,
+                    temperature=self.settings["temperature"],
+                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
+                    repetition_penalty=self.settings["repetition_penalty"]
+                )
+
+            else:
+                # --- Text-Only Model Generation ---
+                inputs = self.processor.apply_chat_template(
+                    self.conversation_history, add_generation_prompt=True, return_tensors="pt"
+                ).to(self.model.device)
+
+                generation_kwargs = dict(
+                    input_ids=inputs,
+                    streamer=self.streamer,
+                    max_new_tokens=512,
+                    do_sample=True,
+                    temperature=self.settings["temperature"],
+                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
+                    repetition_penalty=self.settings["repetition_penalty"]
+                )
 
             start_time = time.time()
             outputs = self.model.generate(**generation_kwargs)
             end_time = time.time()
 
-            new_tokens = outputs[0][input_ids.shape[-1]:]
+            # For VL models, inputs is a dict, for text models it's a tensor
+            input_ids_length = generation_kwargs['input_ids'].shape[-1]
+
+            new_tokens = outputs[0][input_ids_length:]
             num_new_tokens = len(new_tokens)
-            result = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+            result = self.processor.decode(new_tokens, skip_special_tokens=True)
 
             duration = end_time - start_time
             tokens_per_sec = num_new_tokens / duration if duration > 0 else 0
@@ -137,7 +190,7 @@ class LiquidAIApp(QWidget):
         self.setGeometry(100, 100, 1000, 700)
 
         self.model = None
-        self.tokenizer = None
+        self.processor = None
         self.current_conversation_id = None
         self.conversations = {}
         self.settings = {
@@ -151,6 +204,8 @@ class LiquidAIApp(QWidget):
         self.rag_documents_path = "documents/"
         os.makedirs(self.rag_documents_path, exist_ok=True)
         self.current_assistant_message = ""
+        # VL attributes
+        self.selected_image_path = None
 
         self.init_ui()
         self.load_conversations()
@@ -206,6 +261,28 @@ class LiquidAIApp(QWidget):
         model_controls_layout.addWidget(self.eject_button)
         model_controls_layout.addWidget(settings_button)
         right_layout.addLayout(model_controls_layout)
+
+        # --- Zone de saisie utilisateur ---
+        # --- Zone de saisie d'image (pour les modèles VL) ---
+        self.image_input_container = QWidget()
+        image_input_layout = QHBoxLayout(self.image_input_container)
+        image_input_layout.setContentsMargins(0, 5, 0, 5)
+        self.select_image_button = QPushButton("Sélectionner une image")
+        self.select_image_button.clicked.connect(self.select_image)
+        self.image_thumbnail_label = QLabel()
+        self.image_thumbnail_label.setFixedSize(64, 64)
+        self.image_thumbnail_label.setStyleSheet("border: 1px solid #555;")
+        self.image_filename_label = QLabel("Aucune image sélectionnée")
+        self.clear_image_button = QPushButton("X")
+        self.clear_image_button.setFixedSize(30, 30)
+        self.clear_image_button.clicked.connect(self.clear_image)
+        image_input_layout.addWidget(self.select_image_button)
+        image_input_layout.addWidget(self.image_thumbnail_label)
+        image_input_layout.addWidget(self.image_filename_label)
+        image_input_layout.addStretch()
+        image_input_layout.addWidget(self.clear_image_button)
+        right_layout.addWidget(self.image_input_container)
+        self.image_input_container.setVisible(False) # Caché par défaut
 
         # --- Zone de saisie utilisateur ---
         input_layout = QHBoxLayout()
@@ -287,7 +364,13 @@ class LiquidAIApp(QWidget):
     def refresh_model_list(self):
         self.model_selector.blockSignals(True)
         self.model_selector.clear()
-        huggingface_models = ["LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B"]
+        huggingface_models = [
+            "LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B",
+            "LiquidAI/LFM2-8B-A1B", "LiquidAI/LFM2-2.6B", "LiquidAI/LFM2-2.6B-Exp",
+            "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-350M-Extract",
+            "LiquidAI/LFM2-1.2B-RAG", "LiquidAI/LFM2-1.2B-Tool", "LiquidAI/LFM2-350M-Math",
+            "LiquidAI/LFM2-VL-3B", "LiquidAI/LFM2-VL-1.6B", "LiquidAI/LFM2-VL-450M"
+        ]
         self.model_selector.addItems(huggingface_models)
         self.model_selector.blockSignals(False)
         self.on_model_change(self.model_selector.currentText())
@@ -306,7 +389,29 @@ class LiquidAIApp(QWidget):
         if not model_identifier: return
         self.chat_area.clear()
         self.check_device()
+        # Affiche ou cache l'interface de l'image en fonction du modèle
+        is_vl_model = "VL" in model_identifier
+        self.image_input_container.setVisible(is_vl_model)
+        if not is_vl_model:
+            self.clear_image()
         self.load_model(model_identifier)
+
+    def select_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Sélectionner une image", "", "Images (*.png *.jpg *.jpeg *.webp)"
+        )
+        if file_path:
+            self.selected_image_path = file_path
+            pixmap = QPixmap(file_path)
+            self.image_thumbnail_label.setPixmap(
+                pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            )
+            self.image_filename_label.setText(os.path.basename(file_path))
+
+    def clear_image(self):
+        self.selected_image_path = None
+        self.image_thumbnail_label.clear()
+        self.image_filename_label.setText("Aucune image sélectionnée")
 
     def load_model(self, model_identifier):
         self.set_ui_enabled(False)
@@ -316,9 +421,9 @@ class LiquidAIApp(QWidget):
         self.worker.error.connect(self.on_error)
         self.worker.start()
 
-    def on_model_loaded(self, model, tokenizer):
+    def on_model_loaded(self, model, processor):
         self.model = model
-        self.tokenizer = tokenizer
+        self.processor = processor
         model_name = self.model_selector.currentText()
         if hasattr(model, 'config') and hasattr(model.config, '_name_or_path'):
             model_name = model.config._name_or_path
@@ -334,9 +439,9 @@ class LiquidAIApp(QWidget):
         model_name = self.model_selector.currentText()
         self.chat_area.append(f"<i>Déchargement du modèle {model_name}...</i>")
         del self.model
-        del self.tokenizer
+        del self.processor
         self.model = None
-        self.tokenizer = None
+        self.processor = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             self.chat_area.append("<i>Cache GPU vidé.</i>")
@@ -347,7 +452,18 @@ class LiquidAIApp(QWidget):
 
     def send_message(self):
         user_message = self.input_field.text().strip()
-        if not user_message or not self.model or not self.current_conversation_id: return
+        is_vl_model = "VL" in self.model_selector.currentText()
+
+        # Vérification pour les modèles VL
+        if is_vl_model and not self.selected_image_path:
+            self.on_error("Veuillez sélectionner une image pour utiliser ce modèle Vision-Language.")
+            return
+
+        # Le message textuel est optionnel si une image est fournie
+        if not user_message and not self.selected_image_path:
+            return
+
+        if not self.model or not self.current_conversation_id: return
 
         rag_context = ""
         if self.rag_enabled and self.vector_store:
@@ -370,12 +486,20 @@ class LiquidAIApp(QWidget):
 
         self.current_assistant_message = ""
         self.stats_label.setText("")
-        self.generation_worker = GenerationWorker(self.model, self.tokenizer, conversation_history, self.settings)
+
+        self.generation_worker = GenerationWorker(
+            self.model, self.processor, conversation_history, self.settings, self.selected_image_path
+        )
         self.generation_worker.new_token.connect(self.on_new_token)
         self.generation_worker.generation_complete.connect(self.on_generation_complete)
         self.generation_worker.stats.connect(self.on_stats_update)
         self.generation_worker.error.connect(self.on_error)
+        self.generation_worker.finished.connect(self.clear_image_after_generation) # Effacer l'image après usage
         self.generation_worker.start()
+
+    def clear_image_after_generation(self):
+        """Slot to clear the image only after the generation is complete."""
+        self.clear_image()
 
     def on_new_token(self, token):
         if not self.current_assistant_message:
