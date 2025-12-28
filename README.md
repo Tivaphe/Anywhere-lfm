@@ -8,9 +8,10 @@ Une application de bureau et une API locale pour interagir avec les modèles LFM
 
 ## Fonctionnalités Principales
 
-- **Interface Graphique Intuitive** : Une application de bureau simple et efficace construite avec PyQt6 pour interagir avec les modèles.
-- **Gestion Dynamique des Modèles** : Chargez et déchargez les modèles de langue à la volée pour libérer les ressources (VRAM/RAM).
-- **Support RAG (Retrieval-Augmented Generation)** : Améliorez les réponses du modèle en lui fournissant le contexte de vos propres documents (`.txt`, `.pdf`, `.docx`).
+- **Interface Graphique Intuitive** : Une application de bureau simple et efficace construite avec PyQt6.
+- **Support Multimodal (Image + Texte)** : Interagissez avec les modèles Vision-Language (VL) en fournissant une image en plus de votre question.
+- **Gestion Dynamique des Modèles** : Chargez et déchargez les modèles de langue et de vision à la volée pour libérer les ressources (VRAM/RAM).
+- **Support RAG (Retrieval-Augmented Generation)** : Améliorez les réponses des modèles textuels en leur fournissant le contexte de vos propres documents (`.txt`, `.pdf`, `.docx`).
 - **API Compatible OpenAI** : Exposez le modèle via une API locale qui imite la structure de l'API OpenAI, vous permettant de connecter vos outils et scripts existants.
 - **Streaming de Texte** : Obtenez des réponses en temps réel, mot par mot, pour une expérience plus fluide.
 - **Paramètres Personnalisables** : Ajustez finement les paramètres de génération comme la température, le `min_p` et la pénalité de répétition via une interface dédiée.
@@ -61,13 +62,13 @@ Lancez l'application en utilisant `run.bat` (Windows) ou `./run.sh` (macOS/Linux
   - Faites un clic droit sur une conversation pour la supprimer.
 
 - **Panneau de Droite (Chat)** :
-  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante. L'application le téléchargera (si nécessaire) et le chargera en mémoire.
-  - **Éjecter le Modèle** : Cliquez sur ce bouton pour décharger le modèle de la VRAM/RAM et libérer les ressources.
-  - **Paramètres** : Ouvre une fenêtre pour ajuster le *prompt système*, la *température*, le *min_p*, et d'autres options de génération.
-  - **Zone de Chat** : Affiche la conversation en cours.
-  - **Champ de Saisie** : Tapez votre message et appuyez sur Entrée ou cliquez sur "Envoyer".
+  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante, qui inclut désormais les modèles de texte et les modèles Vision-Language (VL).
+  - **Utilisation des Modèles VL** : Si vous sélectionnez un modèle VL (par ex., `LiquidAI/LFM2-VL-3B`), une nouvelle zone apparaîtra pour vous permettre de **sélectionner une image**. Cliquez dessus pour choisir un fichier image (`.png`, `.jpg`, etc.). L'image sera envoyée avec votre prochain message.
+  - **Éjecter le Modèle** : Libère les ressources VRAM/RAM en déchargeant le modèle actuel.
+  - **Paramètres** : Ajustez les paramètres de génération.
+  - **Champ de Saisie** : Tapez votre question (même si vous avez chargé une image) et envoyez.
 
-### 2. Fonctionnalité RAG (Retrieval-Augmented Generation)
+### 2. Fonctionnalité RAG (pour les modèles de texte uniquement)
 
 La fonctionnalité RAG permet au modèle de répondre à des questions sur des informations contenues dans vos documents personnels.
 
@@ -82,16 +83,42 @@ Lancez le serveur d'API avec `run_api.bat` (Windows) ou `./run_api.sh` (macOS/Li
 
 Vous pouvez maintenant utiliser cette URL dans n'importe quel client ou bibliothèque compatible avec l'API OpenAI.
 
-**Exemple avec `curl` :**
+**Exemple avec `curl` (Modèle Texte) :**
 
 ```bash
 curl -X POST "http://localhost:8000/v1/chat/completions" \
 -H "Content-Type: application/json" \
 -d '{
-  "model": "LiquidAI/LFM2-350M",
+  "model": "LiquidAI/LFM2-1.2B",
   "messages": [
     {"role": "system", "content": "You are a helpful assistant."},
     {"role": "user", "content": "Explique le concept de RAG en une phrase."}
+  ]
+}'
+```
+
+**Exemple avec `curl` (Modèle Vision-Language) :**
+
+Pour envoyer une image, vous pouvez fournir une URL publique ou une image encodée en base64.
+
+```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+-H "Content-Type: application/json" \
+-d '{
+  "model": "LiquidAI/LFM2-VL-1.6B",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Que vois-tu sur cette image ?"},
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "https://www.ilankelman.org/stopsigns/australia.jpg"
+          }
+        }
+      ]
+    }
   ]
 }'
 ```
@@ -122,7 +149,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 Les dépendances sont listées dans le fichier `requirements.txt` et sont installées automatiquement. Les principales bibliothèques utilisées sont :
 
 - **GUI** : `PyQt6`
-- **Modèles IA** : `transformers`, `torch`, `accelerate`
+- **Modèles IA** : `transformers`, `torch`, `accelerate`, `Pillow`
 - **API** : `fastapi`, `uvicorn`
 - **RAG** : `langchain`, `langchain-community`, `sentence-transformers`, `faiss-cpu`, `pypdf`, `python-docx`
 - **Autres** : `markdown2`
