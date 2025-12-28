@@ -17,7 +17,7 @@ import markdown2
 
 # RAG specific imports
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 # --- CORRECTION 1: Mise à jour de l'import pour suivre l'avertissement ---
 from langchain_community.vectorstores import FAISS # Ancien import: from langchain.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
