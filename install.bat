@@ -1,4 +1,6 @@
 @echo off
+title Installateur LiquidAI
+
 echo #################################################################
 echo #                                                               #
 echo #         Installateur pour l'application LiquidAI              #
@@ -9,15 +11,22 @@ echo # toutes les dependances necessaires.                           #
 echo #                                                               #
 echo #################################################################
 echo.
-pause
+echo Lancement de l'installation...
+echo.
 
 REM Etape 1: Verifier les prerequis
 echo [ETAPE 1/4] Verification de Python...
 python --version >nul 2>nul
 if %errorlevel% neq 0 (
-    echo ERREUR: Python n'est pas installe ou n'est pas dans votre PATH.
-    echo Veuillez l'installer (et cochez "Add to PATH") depuis:
+    echo.
+    echo ===============================================================
+    echo = ERREUR: Python n'est pas installe ou n'est pas dans votre PATH.
+    echo ===============================================================
+    echo.
+    echo Veuillez l'installer (et cochez "Add to PATH" pendant l'installation) depuis:
     echo https://www.python.org/downloads/
+    echo.
+    echo Le script va maintenant se fermer.
     pause
     exit /b 1
 )
@@ -30,7 +39,13 @@ if not exist venv (
     echo Creation du dossier 'venv'...
     python -m venv venv
     if %errorlevel% neq 0 (
-        echo ERREUR: Impossible de creer l'environnement virtuel.
+        echo.
+        echo ===============================================================
+        echo = ERREUR: Impossible de creer l'environnement virtuel.
+        echo ===============================================================
+        echo.
+        echo Verifiez votre installation de Python.
+        echo Le script va maintenant se fermer.
         pause
         exit /b 1
     )
@@ -47,16 +62,27 @@ call venv\\Scripts\\activate
 echo Mise a jour de pip...
 python -m pip install --upgrade pip
 if %errorlevel% neq 0 (
-    echo ERREUR: Impossible de mettre a jour pip.
+    echo.
+    echo ===============================================================
+    echo = ERREUR: Impossible de mettre a jour pip.
+    echo ===============================================================
+    echo.
+    echo Le script va maintenant se fermer.
     pause
     exit /b 1
 )
 
 echo Installation des dependances depuis requirements.txt...
+echo Cela peut prendre plusieurs minutes...
 pip install -r requirements.txt
 if %errorlevel% neq 0 (
-    echo ERREUR: L'installation des dependances a echoue.
+    echo.
+    echo ===============================================================
+    echo = ERREUR: L'installation des dependances a echoue.
+    echo ===============================================================
+    echo.
     echo Verifiez les messages d'erreur ci-dessus.
+    echo Le script va maintenant se fermer.
     pause
     exit /b 1
 )
@@ -67,8 +93,13 @@ REM Etape 4: Verifier l'installation
 echo [ETAPE 4/4] Verification de l'installation de PyQt6...
 pip show PyQt6 >nul 2>nul
 if %errorlevel% neq 0 (
-    echo ERREUR CRITIQUE: PyQt6 n'a pas pu etre installe correctement.
+    echo.
+    echo ===============================================================
+    echo = ERREUR CRITIQUE: PyQt6 n'a pas pu etre installe correctement.
+    echo ===============================================================
+    echo.
     echo L'application ne peut pas demarrer.
+    echo Le script va maintenant se fermer.
     pause
     exit /b 1
 )
@@ -83,6 +114,7 @@ echo #################################################################
 echo.
 echo Vous pouvez maintenant lancer l'application en executant run.bat
 echo.
+echo Le script va maintenant tenter de lancer l'application pour vous.
 pause
 
 REM Lancement de l'application
