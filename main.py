@@ -1,146 +1,63 @@
-import sys
-import os
+import html
 import json
-import uuid
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
-                             QLineEdit, QPushButton, QComboBox, QLabel, QMenu,
-                             QHBoxLayout, QSplitter, QListWidget, QListWidgetItem,
-                             QFileDialog, QCheckBox)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QObject
-from PyQt6.QtGui import QPixmap
-from transformers import (AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, TextStreamer,
-                          AutoProcessor, AutoModelForImageTextToText)
-from transformers.image_utils import load_image
-import torch
-import time
-import markdown2
+import os
+import sys
 import traceback
-from llama_cpp import Llama
-from huggingface_hub import hf_hub_download, list_repo_files
+import uuid
 
-# RAG specific imports
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-# --- CORRECTION 1: Mise à jour de l'import pour suivre l'avertissement ---
-from langchain_community.vectorstores import FAISS # Ancien import: from langchain.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import markdown2
+from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
+from core.config import load_settings, save_settings
+from core.device import describe_device
+from core.generate import generate
+from core.models import (
+    SUPPORTED_MODELS,
+    LoadedModel,
+    is_vl_model,
+    load_model,
+    unload_model,
+)
+from core.rag import RagIndex
 from settings import SettingsWindow
 
-# --- Workers pour le chargement et la génération en arrière-plan ---
+
 class ModelWorker(QThread):
-    model_loaded = pyqtSignal(object, object)
+    model_loaded = pyqtSignal(object)
     error = pyqtSignal(str)
     status_update = pyqtSignal(str)
 
-    def __init__(self, model_name):
+    def __init__(self, model_name: str):
         super().__init__()
         self.model_name = model_name
-        self.model_path = None # For GGUF models
 
     def run(self):
         try:
-            offload_folder = "./offload"
-            os.makedirs(offload_folder, exist_ok=True)
+            loaded = load_model(self.model_name, status_callback=self.status_update.emit)
+            self.model_loaded.emit(loaded)
+        except Exception as exc:
+            self.error.emit(
+                f"Erreur de chargement du modèle : {exc}\n\nTraceback:\n{traceback.format_exc()}"
+            )
 
-            is_gguf = "GGUF" in self.model_name
-            is_vl_model = "VL" in self.model_name
-
-            if is_gguf:
-                # --- Llama.cpp GGUF Model Loading ---
-                self.status_update.emit("Recherche du fichier GGUF sur le Hugging Face Hub...")
-                repo_files = list_repo_files(self.model_name)
-                gguf_files = [f for f in repo_files if f.endswith(".gguf")]
-
-                if not gguf_files:
-                    raise FileNotFoundError(f"Aucun fichier GGUF trouvé dans le repository {self.model_name}")
-
-                # Heuristique : préférer les quantizations Q4_K_M si disponibles, sinon prendre la première.
-                model_file = next((f for f in gguf_files if "Q4_K_M" in f.upper()), gguf_files[0])
-
-                self.status_update.emit(f"Téléchargement du modèle GGUF : {model_file}...")
-                model_path = hf_hub_download(
-                    repo_id=self.model_name,
-                    filename=model_file,
-                    local_dir=os.path.join(os.getcwd(), 'models'), # Store in a 'models' subdirectory
-                    local_dir_use_symlinks=False
-                )
-                self.model_path = model_path
-                self.status_update.emit(f"Chargement de {model_file} avec llama.cpp...")
-
-                # We pass the Llama instance itself as the model, and None for the processor
-                model = Llama(model_path=model_path, n_ctx=2048, n_gpu_layers=-1, verbose=True) # -1 for max GPU layers
-                self.model_loaded.emit(model, None)
-
-            elif is_vl_model:
-                # --- Vision-Language Model Loading ---
-                processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
-                model = AutoModelForImageTextToText.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True,
-                    device_map="auto",
-                    torch_dtype=torch.bfloat16,
-                    offload_folder=offload_folder
-                )
-                self.model_loaded.emit(model, processor)
-
-            else:
-                # --- Standard Transformers Model Loading ---
-                tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-                model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True,
-                    device_map="auto",
-                    torch_dtype="auto",
-                    offload_folder=offload_folder
-                )
-                self.model_loaded.emit(model, tokenizer)
-
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.error.emit(f"Erreur de chargement du modèle : {e}\n\nTraceback:\n{tb}")
-
-
-class PyQtStreamer(TextStreamer, QObject):
-    new_token = pyqtSignal(str)
-
-    def __init__(self, tokenizer, skip_prompt=False, **decode_kwargs):
-        TextStreamer.__init__(self, tokenizer, skip_prompt=skip_prompt, **decode_kwargs)
-        QObject.__init__(self)
-        self.token_cache = []
-        self.print_len = 0
-        self.next_tokens_are_prompt = True
-
-    def put(self, value):
-        if len(value.shape) > 1 and value.shape[0] > 1:
-            raise ValueError("PyQtStreamer only supports batch size 1")
-        elif len(value.shape) > 1:
-            value = value[0]
-
-        if self.skip_prompt and self.next_tokens_are_prompt:
-            self.next_tokens_are_prompt = False
-            return
-
-        self.token_cache.extend(value.tolist())
-        text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
-
-        if self.print_len == 0:
-            printable_text = text
-        else:
-            printable_text = text[self.print_len:]
-
-        self.print_len = len(text)
-        if printable_text:
-            self.new_token.emit(printable_text)
-
-    def end(self):
-        text = self.tokenizer.decode(self.token_cache, **self.decode_kwargs)
-        printable_text = text[self.print_len:]
-        if printable_text:
-            self.new_token.emit(printable_text)
-        self.next_tokens_are_prompt = True
-        self.token_cache = []
-        self.print_len = 0
 
 class GenerationWorker(QThread):
     generation_complete = pyqtSignal(str)
@@ -148,121 +65,54 @@ class GenerationWorker(QThread):
     error = pyqtSignal(str)
     stats = pyqtSignal(float)
 
-    def __init__(self, model, processor, conversation_history, settings, image_path=None):
+    def __init__(self, loaded_model: LoadedModel, conversation_history, settings, image_path=None):
         super().__init__()
-        self.model = model
-        self.processor = processor # Can be a tokenizer or a processor
+        self.loaded_model = loaded_model
         self.conversation_history = conversation_history
         self.settings = settings
         self.image_path = image_path
-        self.is_vl_model = isinstance(model, PreTrainedModel) and "VL" in model.config._name_or_path
-        self.is_llama_cpp = isinstance(model, Llama)
-
-        # Streaming is handled differently for llama.cpp
-        if not self.is_vl_model and not self.is_llama_cpp:
-            self.streamer = PyQtStreamer(self.processor, skip_prompt=True)
-            self.streamer.new_token.connect(self.new_token)
-        else:
-            self.streamer = None
 
     def run(self):
         try:
-            start_time = time.time()
-            if self.is_llama_cpp:
-                # --- Llama.cpp GGUF Generation ---
-                response = self.model.create_chat_completion(
-                    messages=self.conversation_history,
-                    temperature=self.settings["temperature"],
-                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else 1.0,
-                    repeat_penalty=self.settings["repetition_penalty"],
-                    max_tokens=512,
-                    stream=True
-                )
-
-                full_response = ""
-                for chunk in response:
-                    delta = chunk['choices'][0]['delta']
-                    if 'content' in delta:
-                        token = delta['content']
-                        full_response += token
-                        self.new_token.emit(token)
-
-                result = full_response
-                num_new_tokens = len(self.model.tokenize(result.encode('utf-8')))
-
-
-            elif self.is_vl_model:
-                # --- VL Model Generation ---
-                image = load_image(self.image_path)
-
-                # Le processeur attend une conversation où le dernier message utilisateur contient l'image et le texte
-                vl_conversation = self.conversation_history[:-1] # Historique sans le dernier message
-                last_user_message = self.conversation_history[-1]
-
-                content = [{"type": "image", "image": image}]
-                if last_user_message['content']: # Ajoute le texte s'il y en a
-                    content.append({"type": "text", "text": last_user_message['content']})
-
-                vl_conversation.append({
-                    "role": "user",
-                    "content": content
-                })
-
-                inputs = self.processor.apply_chat_template(
-                    vl_conversation, add_generation_prompt=True, return_tensors="pt"
-                ).to(self.model.device)
-
-                generation_kwargs = dict(
-                    **inputs,
-                    max_new_tokens=512,
-                    do_sample=True,
-                    temperature=self.settings["temperature"],
-                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
-                    repetition_penalty=self.settings["repetition_penalty"]
-                )
-
-                outputs = self.model.generate(**generation_kwargs)
-                input_ids_length = generation_kwargs['input_ids'].shape[-1]
-                new_tokens = outputs[0][input_ids_length:]
-                num_new_tokens = len(new_tokens)
-                result = self.processor.decode(new_tokens, skip_special_tokens=True)
-
-
-            else:
-                # --- Text-Only Model Generation ---
-                inputs = self.processor.apply_chat_template(
-                    self.conversation_history, add_generation_prompt=True, return_tensors="pt"
-                ).to(self.model.device)
-
-                generation_kwargs = dict(
-                    input_ids=inputs,
-                    streamer=self.streamer,
-                    max_new_tokens=512,
-                    do_sample=True,
-                    temperature=self.settings["temperature"],
-                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else None,
-                    repetition_penalty=self.settings["repetition_penalty"]
-                )
-
-                outputs = self.model.generate(**generation_kwargs)
-                input_ids_length = generation_kwargs['input_ids'].shape[-1]
-                new_tokens = outputs[0][input_ids_length:]
-                num_new_tokens = len(new_tokens)
-                result = self.processor.decode(new_tokens, skip_special_tokens=True)
-
-            end_time = time.time()
-
-            duration = end_time - start_time
-            tokens_per_sec = num_new_tokens / duration if duration > 0 else 0
-
+            result, tokens_per_sec = generate(
+                self.loaded_model,
+                self.conversation_history,
+                self.settings,
+                image_path=self.image_path,
+                on_token=self.new_token.emit,
+            )
             self.stats.emit(tokens_per_sec)
             self.generation_complete.emit(result)
+        except Exception as exc:
+            self.error.emit(
+                f"Erreur de génération : {exc}\n\nTraceback:\n{traceback.format_exc()}"
+            )
 
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.error.emit(f"Erreur de génération : {e}\n\nTraceback:\n{tb}")
 
-# --- Application Principale ---
+class RagWorker(QThread):
+    status_update = pyqtSignal(str)
+    index_ready = pyqtSignal(int)
+    error = pyqtSignal(str)
+
+    def __init__(self, rag_index: RagIndex, files, chunk_size: int, chunk_overlap: int):
+        super().__init__()
+        self.rag_index = rag_index
+        self.files = files
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+    def run(self):
+        try:
+            self.status_update.emit(f"Copie de {len(self.files)} document(s)...")
+            self.rag_index.add_files(self.files)
+            self.status_update.emit("Création de la base de données vectorielle...")
+            count = self.rag_index.rebuild(self.chunk_size, self.chunk_overlap)
+            self.index_ready.emit(count)
+        except Exception as exc:
+            self.error.emit(
+                f"Erreur lors de la création de l'index RAG : {exc}\n\nTraceback:\n{traceback.format_exc()}"
+            )
+
 
 class LiquidAIApp(QWidget):
     def __init__(self):
@@ -270,39 +120,32 @@ class LiquidAIApp(QWidget):
         self.setWindowTitle("LiquidAI Chat")
         self.setGeometry(100, 100, 1000, 700)
 
-        self.model = None
-        self.processor = None
+        self.loaded_model = None
         self.current_conversation_id = None
         self.conversations = {}
-        self.settings = {
-            "system_prompt": "You are a helpful assistant.", "temperature": 0.3,
-            "min_p": 0.15, "repetition_penalty": 1.05,
-            "rag_chunk_size": 500, "rag_chunk_overlap": 50
-        }
-        # RAG attributes
+        self.settings = load_settings()
         self.rag_enabled = False
-        self.vector_store = None
-        self.rag_documents_path = "documents/"
-        os.makedirs(self.rag_documents_path, exist_ok=True)
+        self.rag_index = RagIndex("documents/")
         self.current_assistant_message = ""
-        # VL attributes
         self.selected_image_path = None
+        self.busy = False
 
         self.init_ui()
         self.load_conversations()
         self.check_device()
         self.refresh_model_list()
+        self.chat_area.append(
+            "<i>Aucun modèle chargé. Choisissez un modèle puis cliquez sur Charger.</i>"
+        )
         if not self.conversations:
             self.start_new_conversation()
         else:
             self.history_list.setCurrentRow(0)
             self.load_selected_conversation(self.history_list.item(0))
 
-
     def init_ui(self):
         main_layout = QHBoxLayout(self)
 
-        # --- Panneau de gauche (Historique) ---
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -315,36 +158,33 @@ class LiquidAIApp(QWidget):
         new_chat_button = QPushButton("Nouvelle Discussion")
         new_chat_button.clicked.connect(self.start_new_conversation)
         left_layout.addWidget(new_chat_button)
-        
-        # --- CORRECTION 2: Le code ci-dessous a été ré-indenté pour faire partie de la fonction init_ui ---
 
-        # --- Panneau de droite (Chat) ---
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
         self.chat_area = QTextEdit()
         self.chat_area.setReadOnly(True)
-        self.chat_area.setStyleSheet("font-size: 14px;")
+        self.chat_area.setStyleSheet("font-size: 14px; color: #f2f2f2; background-color: #2b2b2b;")
         right_layout.addWidget(self.chat_area)
 
-        # --- Contrôles du modèle ---
         model_controls_layout = QHBoxLayout()
         self.model_selector = QComboBox()
         self.model_selector.currentTextChanged.connect(self.on_model_change)
+        self.load_button = QPushButton("Charger")
+        self.load_button.clicked.connect(self.load_selected_model)
         settings_button = QPushButton("Paramètres")
         settings_button.clicked.connect(self.open_settings)
-        self.eject_button = QPushButton("Ejecter")
+        self.eject_button = QPushButton("Éjecter")
         self.eject_button.clicked.connect(self.eject_model)
         self.eject_button.setEnabled(False)
         model_controls_layout.addWidget(QLabel("Modèle:"))
         model_controls_layout.addWidget(self.model_selector)
+        model_controls_layout.addWidget(self.load_button)
         model_controls_layout.addWidget(self.eject_button)
         model_controls_layout.addWidget(settings_button)
         right_layout.addLayout(model_controls_layout)
 
-        # --- Zone de saisie utilisateur ---
-        # --- Zone de saisie d'image (pour les modèles VL) ---
         self.image_input_container = QWidget()
         image_input_layout = QHBoxLayout(self.image_input_container)
         image_input_layout.setContentsMargins(0, 5, 0, 5)
@@ -363,9 +203,8 @@ class LiquidAIApp(QWidget):
         image_input_layout.addStretch()
         image_input_layout.addWidget(self.clear_image_button)
         right_layout.addWidget(self.image_input_container)
-        self.image_input_container.setVisible(False) # Caché par défaut
+        self.image_input_container.setVisible(False)
 
-        # --- Zone de saisie utilisateur ---
         input_layout = QHBoxLayout()
         self.input_field = QLineEdit()
         self.input_field.setStyleSheet("font-size: 14px;")
@@ -377,7 +216,6 @@ class LiquidAIApp(QWidget):
         input_layout.addWidget(self.send_button)
         right_layout.addLayout(input_layout)
 
-        # --- RAG Controls ---
         rag_layout = QHBoxLayout()
         self.load_docs_button = QPushButton("Charger Documents")
         self.load_docs_button.clicked.connect(self.load_documents)
@@ -392,7 +230,6 @@ class LiquidAIApp(QWidget):
         rag_layout.addWidget(self.stats_label)
         right_layout.addLayout(rag_layout)
 
-        # --- Splitter pour séparer les panneaux ---
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
@@ -400,6 +237,7 @@ class LiquidAIApp(QWidget):
 
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
+        self.set_ui_enabled(True)
 
     def show_conversation_context_menu(self, position):
         item = self.history_list.itemAt(position)
@@ -409,19 +247,17 @@ class LiquidAIApp(QWidget):
         context_menu = QMenu(self)
         delete_action = context_menu.addAction("Supprimer")
         action = context_menu.exec(self.history_list.mapToGlobal(position))
-
         if action == delete_action:
             self.delete_conversation(item)
 
     def delete_conversation(self, item):
         conv_id = item.data(Qt.ItemDataRole.UserRole)
-
         file_path = f"conversations/{conv_id}.json"
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except OSError as e:
-                self.on_error(f"Impossible de supprimer le fichier {file_path}: {e}")
+            except OSError as exc:
+                self.on_error(f"Impossible de supprimer le fichier {file_path}: {exc}")
                 return
 
         if conv_id in self.conversations:
@@ -439,25 +275,12 @@ class LiquidAIApp(QWidget):
                 self.start_new_conversation()
 
     def check_device(self):
-        device = f"GPU: {torch.cuda.get_device_name(0)}" if torch.cuda.is_available() else "CPU"
-        self.chat_area.append(f"<i>Utilisation de l'appareil : {device}</i>")
+        self.chat_area.append(f"<i>Utilisation de l'appareil : {html.escape(describe_device())}</i>")
 
     def refresh_model_list(self):
         self.model_selector.blockSignals(True)
         self.model_selector.clear()
-        huggingface_models = [
-            # Transformers Models
-            "LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B",
-            "LiquidAI/LFM2-8B-A1B", "LiquidAI/LFM2-2.6B", "LiquidAI/LFM2-2.6B-Exp",
-            "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-350M-Extract",
-            "LiquidAI/LFM2-1.2B-RAG", "LiquidAI/LFM2-1.2B-Tool", "LiquidAI/LFM2-350M-Math",
-            # Vision-Language Models
-            "LiquidAI/LFM2-VL-3B", "LiquidAI/LFM2-VL-1.6B", "LiquidAI/LFM2-VL-450M",
-            # GGUF Models for llama.cpp
-            "LiquidAI/LFM2-2.6B-GGUF", "LiquidAI/LFM2-8B-A1B-GGUF",
-            "LiquidAI/LFM2-1.2B-GGUF", "LiquidAI/LFM2-700M-GGUF", "LiquidAI/LFM2-350M-GGUF"
-        ]
-        self.model_selector.addItems(huggingface_models)
+        self.model_selector.addItems(SUPPORTED_MODELS)
         self.model_selector.blockSignals(False)
         self.on_model_change(self.model_selector.currentText())
 
@@ -466,20 +289,39 @@ class LiquidAIApp(QWidget):
         dialog.set_settings(self.settings)
         if dialog.exec():
             self.settings = dialog.get_settings()
+            save_settings(self.settings)
             self.chat_area.append("<i>Paramètres mis à jour.</i>")
             if self.current_conversation_id:
-                self.conversations[self.current_conversation_id][0] = {"role": "system", "content": self.settings["system_prompt"]}
+                history = self.conversations.get(self.current_conversation_id, [])
+                if history and history[0].get("role") == "system":
+                    history[0] = {"role": "system", "content": self.settings["system_prompt"]}
+                else:
+                    history.insert(0, {"role": "system", "content": self.settings["system_prompt"]})
                 self.display_current_conversation()
 
-    def on_model_change(self, model_identifier):
-        if not model_identifier: return
-        self.chat_area.clear()
-        self.check_device()
-        # Affiche ou cache l'interface de l'image en fonction du modèle
-        is_vl_model = "VL" in model_identifier
-        self.image_input_container.setVisible(is_vl_model)
-        if not is_vl_model:
+    def on_model_change(self, model_identifier: str):
+        if not model_identifier:
+            return
+        vl_selected = is_vl_model(model_identifier)
+        self.image_input_container.setVisible(vl_selected)
+        if not vl_selected:
             self.clear_image()
+        if self.loaded_model and self.loaded_model.name != model_identifier:
+            self.chat_area.append(
+                f"<i>Modèle sélectionné : {html.escape(model_identifier)}. "
+                "Cliquez sur Charger pour l'utiliser.</i>"
+            )
+
+    def load_selected_model(self):
+        model_identifier = self.model_selector.currentText()
+        if not model_identifier:
+            return
+        if self.loaded_model and self.loaded_model.name == model_identifier:
+            self.chat_area.append(f"<i>Le modèle {html.escape(model_identifier)} est déjà chargé.</i>")
+            return
+        if self.loaded_model:
+            unload_model(self.loaded_model)
+            self.loaded_model = None
         self.load_model(model_identifier)
 
     def select_image(self):
@@ -490,7 +332,12 @@ class LiquidAIApp(QWidget):
             self.selected_image_path = file_path
             pixmap = QPixmap(file_path)
             self.image_thumbnail_label.setPixmap(
-                pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                pixmap.scaled(
+                    64,
+                    64,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
             self.image_filename_label.setText(os.path.basename(file_path))
 
@@ -499,100 +346,92 @@ class LiquidAIApp(QWidget):
         self.image_thumbnail_label.clear()
         self.image_filename_label.setText("Aucune image sélectionnée")
 
-    def load_model(self, model_identifier):
+    def load_model(self, model_identifier: str):
         self.set_ui_enabled(False)
-        self.chat_area.append(f"<i>Préparation du chargement du modèle {model_identifier}...</i>")
+        self.chat_area.append(f"<i>Préparation du chargement du modèle {html.escape(model_identifier)}...</i>")
         self.worker = ModelWorker(model_identifier)
         self.worker.model_loaded.connect(self.on_model_loaded)
         self.worker.error.connect(self.on_error)
-        self.worker.status_update.connect(self.on_status_update) # Connect the new signal
+        self.worker.status_update.connect(self.on_status_update)
         self.worker.start()
 
-    def on_status_update(self, message):
-        """Affiche un message de statut provenant d'un thread de travail."""
-        self.chat_area.append(f"<i>{message}</i>")
+    def on_status_update(self, message: str):
+        self.chat_area.append(f"<i>{html.escape(message)}</i>")
 
-    def on_model_loaded(self, model, processor):
-        self.model = model
-        self.processor = processor
-        model_name = self.model_selector.currentText()
-        if hasattr(model, 'config') and hasattr(model.config, '_name_or_path'):
-            model_name = model.config._name_or_path
-        self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
+    def on_model_loaded(self, loaded: LoadedModel):
+        self.loaded_model = loaded
+        self.chat_area.append(f"<i>Modèle {html.escape(loaded.name)} chargé.</i>")
         self.set_ui_enabled(True)
-        self.eject_button.setEnabled(True)
         if self.current_conversation_id:
             self.display_current_conversation()
 
     def eject_model(self):
-        if self.model is None:
+        if self.loaded_model is None:
             return
-        model_name = self.model_selector.currentText()
-        self.chat_area.append(f"<i>Déchargement du modèle {model_name}...</i>")
-        del self.model
-        del self.processor
-        self.model = None
-        self.processor = None
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            self.chat_area.append("<i>Cache GPU vidé.</i>")
-        self.chat_area.append("<i>Modèle déchargé. Sélectionnez un modèle pour commencer.</i>")
-        self.eject_button.setEnabled(False)
-        self.input_field.setEnabled(False)
-        self.send_button.setEnabled(False)
+        model_name = self.loaded_model.name
+        self.chat_area.append(f"<i>Déchargement du modèle {html.escape(model_name)}...</i>")
+        unload_model(self.loaded_model)
+        self.loaded_model = None
+        self.chat_area.append("<i>Modèle déchargé. Choisissez un modèle puis cliquez sur Charger.</i>")
+        self.set_ui_enabled(True)
 
     def send_message(self):
         user_message = self.input_field.text().strip()
-        is_vl_model = "VL" in self.model_selector.currentText()
+        loaded_is_vl = bool(self.loaded_model and self.loaded_model.kind == "vl")
 
-        # Vérification pour les modèles VL
-        if is_vl_model and not self.selected_image_path:
+        if loaded_is_vl and not self.selected_image_path:
             self.on_error("Veuillez sélectionner une image pour utiliser ce modèle Vision-Language.")
             return
 
-        # Le message textuel est optionnel si une image est fournie
         if not user_message and not self.selected_image_path:
             return
 
-        if not self.model or not self.current_conversation_id: return
+        if not self.loaded_model or not self.current_conversation_id:
+            self.on_error("Chargez d'abord un modèle avant d'envoyer un message.")
+            return
 
         rag_context = ""
-        if self.rag_enabled and self.vector_store:
+        if self.rag_enabled and self.rag_index.ready and not loaded_is_vl and user_message:
             try:
-                docs = self.vector_store.similarity_search(user_message, k=3)
-                rag_context = "\n\nContexte des documents:\n" + "\n---\n".join([doc.page_content for doc in docs])
-                self.chat_area.append(f"<i>Contexte RAG trouvé:\n{rag_context}</i>")
-            except Exception as e:
-                self.on_error(f"Erreur de recherche RAG: {e}")
+                found = self.rag_index.search(user_message, k=3)
+                if found:
+                    rag_context = f"\n\nContexte des documents:\n{found}"
+                    self.chat_area.append(f"<i>Contexte RAG trouvé:\n{html.escape(rag_context)}</i>")
+            except Exception as exc:
+                self.on_error(f"Erreur de recherche RAG: {exc}")
 
-        self.append_message("user", user_message, save=True)
+        display_message = user_message or "(image)"
+        self.append_message("user", display_message, save=True)
         self.input_field.clear()
 
-        self.chat_area.append("<i>L'IA réfléchi...</i>")
+        self.chat_area.append("<i>L'IA réfléchit...</i>")
         self.set_ui_enabled(False)
 
         conversation_history = list(self.conversations[self.current_conversation_id])
         if rag_context:
+            conversation_history[-1] = dict(conversation_history[-1])
             conversation_history[-1]["content"] = f"{rag_context}\n\nQuestion: {user_message}"
 
         self.current_assistant_message = ""
         self.stats_label.setText("")
 
         self.generation_worker = GenerationWorker(
-            self.model, self.processor, conversation_history, self.settings, self.selected_image_path
+            self.loaded_model,
+            conversation_history,
+            self.settings,
+            self.selected_image_path,
         )
         self.generation_worker.new_token.connect(self.on_new_token)
         self.generation_worker.generation_complete.connect(self.on_generation_complete)
         self.generation_worker.stats.connect(self.on_stats_update)
         self.generation_worker.error.connect(self.on_error)
-        self.generation_worker.finished.connect(self.clear_image_after_generation) # Effacer l'image après usage
+        self.generation_worker.finished.connect(self.clear_image_after_generation)
         self.generation_worker.start()
 
     def clear_image_after_generation(self):
-        """Slot to clear the image only after the generation is complete."""
         self.clear_image()
 
-    def on_new_token(self, token):
+    def on_new_token(self, token: str):
         if not self.current_assistant_message:
             cursor = self.chat_area.textCursor()
             cursor.movePosition(cursor.MoveOperation.End)
@@ -607,36 +446,47 @@ class LiquidAIApp(QWidget):
             cursor.insertText(token)
         self.current_assistant_message += token
 
-    def on_stats_update(self, tokens_per_sec):
+    def on_stats_update(self, tokens_per_sec: float):
         self.stats_label.setText(f"{tokens_per_sec:.2f} tokens/s")
 
-    def on_generation_complete(self, response):
-        self.conversations[self.current_conversation_id].append({"role": "assistant", "content": response})
+    def on_generation_complete(self, response: str):
+        if not self.current_conversation_id:
+            self.set_ui_enabled(True)
+            return
+        self.conversations[self.current_conversation_id].append(
+            {"role": "assistant", "content": response}
+        )
         self.save_conversations()
         self.display_current_conversation()
         self.set_ui_enabled(True)
         self.input_field.setFocus()
         self.current_assistant_message = ""
 
-    def on_error(self, error_message):
-        self.chat_area.append(f"<font color='red'>Erreur : {error_message}</font>")
+    def on_error(self, error_message: str):
+        self.chat_area.append(f"<font color='#ff6b6b'>Erreur : {html.escape(error_message)}</font>")
         self.set_ui_enabled(True)
 
-    def set_ui_enabled(self, enabled):
-        self.input_field.setEnabled(enabled)
-        self.send_button.setEnabled(enabled)
+    def set_ui_enabled(self, enabled: bool):
+        self.busy = not enabled
+        has_model = self.loaded_model is not None
+        self.input_field.setEnabled(enabled and has_model)
+        self.send_button.setEnabled(enabled and has_model)
         self.model_selector.setEnabled(enabled)
+        self.load_button.setEnabled(enabled)
+        self.eject_button.setEnabled(enabled and has_model)
         self.history_list.setEnabled(enabled)
         self.load_docs_button.setEnabled(enabled)
-        self.rag_toggle_checkbox.setEnabled(enabled and self.vector_store is not None)
+        self.rag_toggle_checkbox.setEnabled(enabled and self.rag_index.ready)
 
     def toggle_rag(self, state):
-        self.rag_enabled = (state == Qt.CheckState.Checked.value)
+        self.rag_enabled = state == Qt.CheckState.Checked.value
         if self.rag_enabled:
             self.rag_status_label.setText("RAG: Actif")
-            self.chat_area.append("<i>RAG activé. Les documents chargés seront utilisés comme contexte.</i>")
+            self.chat_area.append(
+                "<i>RAG activé. Les documents chargés seront utilisés comme contexte (modèles texte uniquement).</i>"
+            )
         else:
-            self.rag_status_label.setText("RAG: Inactif")
+            self.rag_status_label.setText("RAG: Inactif" if not self.rag_index.ready else "RAG: Prêt")
             self.chat_area.append("<i>RAG désactivé.</i>")
 
     def load_documents(self):
@@ -646,70 +496,41 @@ class LiquidAIApp(QWidget):
         if not files:
             return
 
-        self.chat_area.append(f"<i>Chargement de {len(files)} document(s)...</i>")
-        QApplication.processEvents()
+        self.set_ui_enabled(False)
+        self.rag_worker = RagWorker(
+            self.rag_index,
+            files,
+            int(self.settings.get("rag_chunk_size", 500)),
+            int(self.settings.get("rag_chunk_overlap", 50)),
+        )
+        self.rag_worker.status_update.connect(self.on_status_update)
+        self.rag_worker.index_ready.connect(self.on_rag_ready)
+        self.rag_worker.error.connect(self.on_rag_error)
+        self.rag_worker.start()
 
-        for file_path in files:
-            filename = os.path.basename(file_path)
-            destination = os.path.join(self.rag_documents_path, filename)
-            try:
-                with open(file_path, 'rb') as f_in, open(destination, 'wb') as f_out:
-                    f_out.write(f_in.read())
-            except Exception as e:
-                self.on_error(f"Erreur lors de la copie du fichier {filename}: {e}")
-                return
+    def on_rag_ready(self, chunk_count: int):
+        self.rag_status_label.setText("RAG: Prêt")
+        self.rag_toggle_checkbox.setEnabled(True)
+        self.chat_area.append(
+            f"<i>Index RAG créé ({chunk_count} morceaux). Vous pouvez maintenant activer le RAG.</i>"
+        )
+        self.set_ui_enabled(True)
 
-        self.chat_area.append("<i>Création de la base de données vectorielle...</i>")
-        QApplication.processEvents()
-
-        try:
-            docs = []
-            for filename in os.listdir(self.rag_documents_path):
-                file_path = os.path.join(self.rag_documents_path, filename)
-                if filename.endswith(".pdf"):
-                    loader = PyPDFLoader(file_path)
-                    docs.extend(loader.load())
-                elif filename.endswith(".docx"):
-                    loader = Docx2txtLoader(file_path)
-                    docs.extend(loader.load())
-                elif filename.endswith(".txt"):
-                    loader = TextLoader(file_path, encoding='utf-8')
-                    docs.extend(loader.load())
-
-            if not docs:
-                self.on_error("Aucun document valide trouvé à traiter.")
-                return
-
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.settings["rag_chunk_size"],
-                chunk_overlap=self.settings["rag_chunk_overlap"]
-            )
-            splits = text_splitter.split_documents(docs)
-
-            embeddings = HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2')
-            self.vector_store = FAISS.from_documents(splits, embeddings)
-
-            self.rag_status_label.setText("RAG: Prêt")
-            self.rag_toggle_checkbox.setEnabled(True)
-            self.chat_area.append("<i>Base de données vectorielle créée avec succès. Vous pouvez maintenant activer le RAG.</i>")
-
-        except Exception as e:
-            self.on_error(f"Erreur lors de la création de l'index RAG : {e}")
-            self.rag_status_label.setText("RAG: Erreur")
-            self.vector_store = None
-            self.rag_toggle_checkbox.setEnabled(False)
+    def on_rag_error(self, message: str):
+        self.rag_status_label.setText("RAG: Erreur")
+        self.rag_toggle_checkbox.setChecked(False)
+        self.rag_enabled = False
+        self.on_error(message)
 
     def start_new_conversation(self):
         self.current_conversation_id = str(uuid.uuid4())
         self.conversations[self.current_conversation_id] = [
             {"role": "system", "content": self.settings["system_prompt"]}
         ]
-
         item = QListWidgetItem(f"Nouvelle Discussion - {self.current_conversation_id[:8]}")
         item.setData(Qt.ItemDataRole.UserRole, self.current_conversation_id)
         self.history_list.insertItem(0, item)
         self.history_list.setCurrentItem(item)
-
         self.display_current_conversation()
 
     def load_selected_conversation(self, item):
@@ -719,72 +540,95 @@ class LiquidAIApp(QWidget):
     def display_current_conversation(self):
         self.chat_area.clear()
         self.check_device()
-        if self.model:
-            model_name = self.model_selector.currentText()
-            if hasattr(self.model, 'config') and hasattr(self.model.config, '_name_or_path'):
-                model_name = self.model.config._name_or_path
-            self.chat_area.append(f"<i>Modèle {model_name} chargé.</i>")
+        if self.loaded_model:
+            self.chat_area.append(f"<i>Modèle {html.escape(self.loaded_model.name)} chargé.</i>")
+        else:
+            self.chat_area.append(
+                "<i>Aucun modèle chargé. Choisissez un modèle puis cliquez sur Charger.</i>"
+            )
 
-        if not self.current_conversation_id: return
+        if not self.current_conversation_id:
+            return
 
         history = self.conversations.get(self.current_conversation_id, [])
         for message in history:
-            self.append_message(message["role"], message["content"], save=False)
+            self.append_message(message["role"], message.get("content", ""), save=False)
+
+    def _conversation_title(self, history, conv_id: str) -> str:
+        for message in history:
+            if message.get("role") == "user":
+                content = message.get("content", "")
+                if not isinstance(content, str):
+                    return "Image + texte"
+                snippet = content[:30]
+                return snippet + ("..." if len(content) > 30 else "")
+        return f"Discussion {conv_id[:8]}"
 
     def append_message(self, role, content, save=True):
-        if not self.current_conversation_id: return
+        if not self.current_conversation_id:
+            return
 
+        text = content if isinstance(content, str) else str(content)
         if save:
-            self.conversations[self.current_conversation_id].append({"role": role, "content": content})
+            self.conversations[self.current_conversation_id].append({"role": role, "content": text})
 
+        safe = html.escape(text)
         if role == "user":
-            html = f"""
-            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+            bubble = f"""
+            <div style='background-color: #3a3a3a; color: #f2f2f2; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
                 <b>Vous:</b>
-                <p style='margin: 0;'>{content}</p>
+                <p style='margin: 0;'>{safe}</p>
             </div>
             """
         elif role == "assistant":
-            formatted_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables"])
-            html = f"""
-            <div style='background-color: #4f4f4f; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
+            formatted = markdown2.markdown(
+                text,
+                extras=["fenced-code-blocks", "tables"],
+                safe_mode="escape",
+            )
+            bubble = f"""
+            <div style='background-color: #3a3a3a; color: #f2f2f2; padding: 10px; border-radius: 5px; margin-bottom: 5px;'>
                 <b>LiquidAI:</b>
-                {formatted_content}
+                {formatted}
             </div>
             """
         else:
-            html = f"<i>{content}</i>"
+            bubble = f"<i>{safe}</i>"
 
-        self.chat_area.append(html)
-
+        self.chat_area.append(bubble)
         if save:
             self.save_conversations()
 
     def save_conversations(self):
         os.makedirs("conversations", exist_ok=True)
-        for conv_id, history in self.conversations.items():
-            with open(f"conversations/{conv_id}.json", "w", encoding="utf-8") as f:
-                json.dump(history, f, ensure_ascii=False, indent=2)
+        if not self.current_conversation_id:
+            return
+        history = self.conversations.get(self.current_conversation_id)
+        if history is None:
+            return
+        path = f"conversations/{self.current_conversation_id}.json"
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(history, handle, ensure_ascii=False, indent=2)
 
     def load_conversations(self):
         if not os.path.exists("conversations"):
             return
 
         for filename in os.listdir("conversations"):
-            if filename.endswith(".json"):
-                conv_id = filename.replace(".json", "")
-                with open(f"conversations/{filename}", "r", encoding="utf-8") as f:
-                    self.conversations[conv_id] = json.load(f)
+            if not filename.endswith(".json"):
+                continue
+            conv_id = filename.replace(".json", "")
+            path = os.path.join("conversations", filename)
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    self.conversations[conv_id] = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                continue
 
-                title = f"Discussion {conv_id[:8]}"
-                for msg in self.conversations[conv_id]:
-                    if msg['role'] == 'user':
-                        title = msg['content'][:30] + "..."
-                        break
-
-                item = QListWidgetItem(title)
-                item.setData(Qt.ItemDataRole.UserRole, conv_id)
-                self.history_list.addItem(item)
+            title = self._conversation_title(self.conversations[conv_id], conv_id)
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, conv_id)
+            self.history_list.addItem(item)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ Une application de bureau et une API locale pour interagir avec les modèles LFM
 
 ## Prérequis
 
-- **Python 3.8+**
+- **Python 3.9+**
 - **Git**
 
 ### ⚠️ Prérequis Important pour les Utilisateurs Windows
@@ -45,7 +45,7 @@ Les scripts d'installation créent un environnement virtuel et installent toutes
 
 1.  **Première fois :**
     *   Rendez les scripts exécutables : `chmod +x install.sh run.sh run_api.sh`.
-    *   Exécutez le script d'installation : `./install.sh`. L'application se lancera automatiquement.
+    *   Exécutez le script d'installation : `./install.sh` (installe depuis `requirements.txt`). L'application se lancera automatiquement.
 2.  **Les fois suivantes :** Exécutez `./run.sh`.
 
 ## Comment Utiliser
@@ -62,10 +62,11 @@ Lancez l'application en utilisant `run.bat` (Windows) ou `./run.sh` (macOS/Linux
   - Faites un clic droit sur une conversation pour la supprimer.
 
 - **Panneau de Droite (Chat)** :
-  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante, qui inclut désormais les modèles de texte et les modèles Vision-Language (VL).
-  - **Utilisation des Modèles VL** : Si vous sélectionnez un modèle VL (par ex., `LiquidAI/LFM2-VL-3B`), une nouvelle zone apparaîtra pour vous permettre de **sélectionner une image**. Cliquez dessus pour choisir un fichier image (`.png`, `.jpg`, etc.). L'image sera envoyée avec votre prochain message.
-  - **Éjecter le Modèle** : Libère les ressources VRAM/RAM en déchargeant le modèle actuel.
-  - **Paramètres** : Ajustez les paramètres de génération.
+  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante (texte, Vision-Language ou GGUF). Le changement de liste **ne charge plus** le modèle tout seul.
+  - **Charger** : Télécharge et charge le modèle sélectionné. Attendez le message « chargé » avant d'envoyer.
+  - **Utilisation des Modèles VL** : Si vous sélectionnez un modèle VL (par ex., `LiquidAI/LFM2-VL-3B`), une zone apparaît pour **sélectionner une image**. L'image est envoyée avec votre prochain message.
+  - **Éjecter le Modèle** : Libère les ressources VRAM/RAM.
+  - **Paramètres** : Température, `min_p` (paramètre officiel LiquidAI, plus `top_p`), pénalité de répétition, longueur max, découpe RAG. Ils sont sauvegardés dans `settings.json`.
   - **Champ de Saisie** : Tapez votre question (même si vous avez chargé une image) et envoyez.
 
 ### 2. Fonctionnalité RAG (pour les modèles de texte uniquement)
@@ -79,21 +80,32 @@ La fonctionnalité RAG permet au modèle de répondre à des questions sur des i
 
 ### 3. API Compatible OpenAI
 
-Lancez le serveur d'API avec `run_api.bat` (Windows) ou `./run_api.sh` (macOS/Linux). Le serveur démarrera sur `http://localhost:8000`.
+Lancez le serveur d'API avec `run_api.bat` (Windows) ou `./run_api.sh` (macOS/Linux). Le serveur écoute par défaut sur `http://127.0.0.1:8000` (localhost uniquement).
 
-Vous pouvez maintenant utiliser cette URL dans n'importe quel client ou bibliothèque compatible avec l'API OpenAI.
+Variables d'environnement optionnelles :
+
+- `LIQUIDAI_HOST` / `LIQUIDAI_PORT` : adresse d'écoute (défaut `127.0.0.1:8000`)
+- `LIQUIDAI_API_KEY` : si défini, les appels doivent envoyer `Authorization: Bearer <clé>`
+- `LIQUIDAI_PRELOAD_MODEL` : précharge un modèle au démarrage (ex. `LiquidAI/LFM2-1.2B`)
+
+Endpoints utiles : `GET /`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/models/unload`.
+
+Vous pouvez utiliser `http://127.0.0.1:8000` dans n'importe quel client compatible OpenAI.
 
 **Exemple avec `curl` (Modèle Texte) :**
 
 ```bash
-curl -X POST "http://localhost:8000/v1/chat/completions" \
+curl -X POST "http://127.0.0.1:8000/v1/chat/completions" \
 -H "Content-Type: application/json" \
 -d '{
   "model": "LiquidAI/LFM2-1.2B",
   "messages": [
     {"role": "system", "content": "You are a helpful assistant."},
     {"role": "user", "content": "Explique le concept de RAG en une phrase."}
-  ]
+  ],
+  "temperature": 0.3,
+  "min_p": 0.15,
+  "repetition_penalty": 1.05
 }'
 ```
 
@@ -102,7 +114,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 Pour envoyer une image, vous pouvez fournir une URL publique ou une image encodée en base64.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/chat/completions" \
+curl -X POST "http://127.0.0.1:8000/v1/chat/completions" \
 -H "Content-Type: application/json" \
 -d '{
   "model": "LiquidAI/LFM2-VL-1.6B",
