@@ -15,6 +15,8 @@ import torch
 import time
 import markdown2
 import traceback
+from llama_cpp import Llama
+from huggingface_hub import hf_hub_download, list_repo_files
 
 # RAG specific imports
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
@@ -29,17 +31,49 @@ from settings import SettingsWindow
 class ModelWorker(QThread):
     model_loaded = pyqtSignal(object, object)
     error = pyqtSignal(str)
+    status_update = pyqtSignal(str)
+
     def __init__(self, model_name):
         super().__init__()
         self.model_name = model_name
+        self.model_path = None # For GGUF models
+
     def run(self):
         try:
-            # Créer un dossier pour le offloading si nécessaire
             offload_folder = "./offload"
             os.makedirs(offload_folder, exist_ok=True)
 
+            is_gguf = "GGUF" in self.model_name
             is_vl_model = "VL" in self.model_name
-            if is_vl_model:
+
+            if is_gguf:
+                # --- Llama.cpp GGUF Model Loading ---
+                self.status_update.emit("Recherche du fichier GGUF sur le Hugging Face Hub...")
+                repo_files = list_repo_files(self.model_name)
+                gguf_files = [f for f in repo_files if f.endswith(".gguf")]
+
+                if not gguf_files:
+                    raise FileNotFoundError(f"Aucun fichier GGUF trouvé dans le repository {self.model_name}")
+
+                # Heuristique : préférer les quantizations Q4_K_M si disponibles, sinon prendre la première.
+                model_file = next((f for f in gguf_files if "Q4_K_M" in f.upper()), gguf_files[0])
+
+                self.status_update.emit(f"Téléchargement du modèle GGUF : {model_file}...")
+                model_path = hf_hub_download(
+                    repo_id=self.model_name,
+                    filename=model_file,
+                    local_dir=os.path.join(os.getcwd(), 'models'), # Store in a 'models' subdirectory
+                    local_dir_use_symlinks=False
+                )
+                self.model_path = model_path
+                self.status_update.emit(f"Chargement de {model_file} avec llama.cpp...")
+
+                # We pass the Llama instance itself as the model, and None for the processor
+                model = Llama(model_path=model_path, n_ctx=2048, n_gpu_layers=-1, verbose=True) # -1 for max GPU layers
+                self.model_loaded.emit(model, None)
+
+            elif is_vl_model:
+                # --- Vision-Language Model Loading ---
                 processor = AutoProcessor.from_pretrained(self.model_name, trust_remote_code=True)
                 model = AutoModelForImageTextToText.from_pretrained(
                     self.model_name,
@@ -49,7 +83,9 @@ class ModelWorker(QThread):
                     offload_folder=offload_folder
                 )
                 self.model_loaded.emit(model, processor)
+
             else:
+                # --- Standard Transformers Model Loading ---
                 tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
                 model = AutoModelForCausalLM.from_pretrained(
                     self.model_name,
@@ -59,8 +95,10 @@ class ModelWorker(QThread):
                     offload_folder=offload_folder
                 )
                 self.model_loaded.emit(model, tokenizer)
+
         except Exception as e:
-            self.error.emit(f"Erreur Transformers : {e}")
+            tb = traceback.format_exc()
+            self.error.emit(f"Erreur de chargement du modèle : {e}\n\nTraceback:\n{tb}")
 
 
 class PyQtStreamer(TextStreamer, QObject):
@@ -117,10 +155,11 @@ class GenerationWorker(QThread):
         self.conversation_history = conversation_history
         self.settings = settings
         self.image_path = image_path
-        self.is_vl_model = "VL" in model.config._name_or_path
+        self.is_vl_model = isinstance(model, PreTrainedModel) and "VL" in model.config._name_or_path
+        self.is_llama_cpp = isinstance(model, Llama)
 
-        # Streaming is only enabled for non-VL models for now
-        if not self.is_vl_model:
+        # Streaming is handled differently for llama.cpp
+        if not self.is_vl_model and not self.is_llama_cpp:
             self.streamer = PyQtStreamer(self.processor, skip_prompt=True)
             self.streamer.new_token.connect(self.new_token)
         else:
@@ -128,7 +167,31 @@ class GenerationWorker(QThread):
 
     def run(self):
         try:
-            if self.is_vl_model:
+            start_time = time.time()
+            if self.is_llama_cpp:
+                # --- Llama.cpp GGUF Generation ---
+                response = self.model.create_chat_completion(
+                    messages=self.conversation_history,
+                    temperature=self.settings["temperature"],
+                    top_p=self.settings["min_p"] if self.settings["min_p"] > 0 else 1.0,
+                    repeat_penalty=self.settings["repetition_penalty"],
+                    max_tokens=512,
+                    stream=True
+                )
+
+                full_response = ""
+                for chunk in response:
+                    delta = chunk['choices'][0]['delta']
+                    if 'content' in delta:
+                        token = delta['content']
+                        full_response += token
+                        self.new_token.emit(token)
+
+                result = full_response
+                num_new_tokens = len(self.model.tokenize(result.encode('utf-8')))
+
+
+            elif self.is_vl_model:
                 # --- VL Model Generation ---
                 image = load_image(self.image_path)
 
@@ -158,6 +221,13 @@ class GenerationWorker(QThread):
                     repetition_penalty=self.settings["repetition_penalty"]
                 )
 
+                outputs = self.model.generate(**generation_kwargs)
+                input_ids_length = generation_kwargs['input_ids'].shape[-1]
+                new_tokens = outputs[0][input_ids_length:]
+                num_new_tokens = len(new_tokens)
+                result = self.processor.decode(new_tokens, skip_special_tokens=True)
+
+
             else:
                 # --- Text-Only Model Generation ---
                 inputs = self.processor.apply_chat_template(
@@ -174,16 +244,13 @@ class GenerationWorker(QThread):
                     repetition_penalty=self.settings["repetition_penalty"]
                 )
 
-            start_time = time.time()
-            outputs = self.model.generate(**generation_kwargs)
+                outputs = self.model.generate(**generation_kwargs)
+                input_ids_length = generation_kwargs['input_ids'].shape[-1]
+                new_tokens = outputs[0][input_ids_length:]
+                num_new_tokens = len(new_tokens)
+                result = self.processor.decode(new_tokens, skip_special_tokens=True)
+
             end_time = time.time()
-
-            # For VL models, inputs is a dict, for text models it's a tensor
-            input_ids_length = generation_kwargs['input_ids'].shape[-1]
-
-            new_tokens = outputs[0][input_ids_length:]
-            num_new_tokens = len(new_tokens)
-            result = self.processor.decode(new_tokens, skip_special_tokens=True)
 
             duration = end_time - start_time
             tokens_per_sec = num_new_tokens / duration if duration > 0 else 0
@@ -379,11 +446,16 @@ class LiquidAIApp(QWidget):
         self.model_selector.blockSignals(True)
         self.model_selector.clear()
         huggingface_models = [
+            # Transformers Models
             "LiquidAI/LFM2-350M", "LiquidAI/LFM2-700M", "LiquidAI/LFM2-1.2B",
             "LiquidAI/LFM2-8B-A1B", "LiquidAI/LFM2-2.6B", "LiquidAI/LFM2-2.6B-Exp",
             "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-350M-Extract",
             "LiquidAI/LFM2-1.2B-RAG", "LiquidAI/LFM2-1.2B-Tool", "LiquidAI/LFM2-350M-Math",
-            "LiquidAI/LFM2-VL-3B", "LiquidAI/LFM2-VL-1.6B", "LiquidAI/LFM2-VL-450M"
+            # Vision-Language Models
+            "LiquidAI/LFM2-VL-3B", "LiquidAI/LFM2-VL-1.6B", "LiquidAI/LFM2-VL-450M",
+            # GGUF Models for llama.cpp
+            "LiquidAI/LFM2-2.6B-GGUF", "LiquidAI/LFM2-8B-A1B-GGUF",
+            "LiquidAI/LFM2-1.2B-GGUF", "LiquidAI/LFM2-700M-GGUF", "LiquidAI/LFM2-350M-GGUF"
         ]
         self.model_selector.addItems(huggingface_models)
         self.model_selector.blockSignals(False)
@@ -429,11 +501,16 @@ class LiquidAIApp(QWidget):
 
     def load_model(self, model_identifier):
         self.set_ui_enabled(False)
-        self.chat_area.append(f"<i>Chargement du modèle {model_identifier}...</i>")
+        self.chat_area.append(f"<i>Préparation du chargement du modèle {model_identifier}...</i>")
         self.worker = ModelWorker(model_identifier)
         self.worker.model_loaded.connect(self.on_model_loaded)
         self.worker.error.connect(self.on_error)
+        self.worker.status_update.connect(self.on_status_update) # Connect the new signal
         self.worker.start()
+
+    def on_status_update(self, message):
+        """Affiche un message de statut provenant d'un thread de travail."""
+        self.chat_area.append(f"<i>{message}</i>")
 
     def on_model_loaded(self, model, processor):
         self.model = model

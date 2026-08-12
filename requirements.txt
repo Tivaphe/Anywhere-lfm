@@ -1,12 +1,12 @@
 PyQt6
 accelerate
 fastapi
-uvicorn[standard]
+uvicorn
 markdown2
 torch
 torchvision
-transformers @ git+https://github.com/huggingface/transformers.git@main
-# RAG Dependencies
+transformers @ git+https://github.com/huggingface/transformers.git@87be5595081364ef99393feeaa60d71db3652679
+# RAG
 langchain
 langchain-community
 langchain-text-splitters
@@ -15,3 +15,6 @@ faiss-cpu
 Pillow
 pypdf
 python-docx
+
+llama-cpp-python
+huggingface-hub
