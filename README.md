@@ -10,6 +10,7 @@ Une application de bureau et une API locale pour interagir avec les modèles LFM
 
 - **Interface Graphique Intuitive** : Une application de bureau simple et efficace construite avec PyQt6.
 - **Support Multimodal (Image + Texte)** : Interagissez avec les modèles Vision-Language (VL) en fournissant une image en plus de votre question.
+- **Catalogue Hugging Face automatique** : l'app scanne le compte [LiquidAI](https://huggingface.co/LiquidAI/models) et liste les nouveaux LFM / LFM2.5 / GGUF sans mise à jour manuelle.
 - **Gestion Dynamique des Modèles** : Chargez et déchargez les modèles de langue et de vision à la volée pour libérer les ressources (VRAM/RAM).
 - **Support RAG (Retrieval-Augmented Generation)** : Améliorez les réponses des modèles textuels en leur fournissant le contexte de vos propres documents (`.txt`, `.pdf`, `.docx`).
 - **API Compatible OpenAI** : Exposez le modèle via une API locale qui imite la structure de l'API OpenAI, vous permettant de connecter vos outils et scripts existants.
@@ -62,8 +63,9 @@ Lancez l'application en utilisant `run.bat` (Windows) ou `./run.sh` (macOS/Linux
   - Faites un clic droit sur une conversation pour la supprimer.
 
 - **Panneau de Droite (Chat)** :
-  - **Sélection de Modèle** : Choisissez un modèle dans la liste déroulante (texte, Vision-Language ou GGUF). Le changement de liste **ne charge plus** le modèle tout seul.
-  - **Charger** : Télécharge et charge le modèle sélectionné. Attendez le message « chargé » avant d'envoyer.
+  - **Sélection de Modèle** : Filtrez puis choisissez un modèle (texte, VL ou GGUF). Le catalogue est lu sur Hugging Face ; **Actualiser HF** rescanne le compte LiquidAI (LFM2, LFM2.5, nouveaux GGUF, etc.).
+  - **Fichier GGUF** : pour un dépôt GGUF, l'app liste les `.gguf` du repo (Q4_K_M recommandé, Q5, Q8, F16…). Plus besoin d'ajouter les quantizations à la main.
+  - **Charger** : Télécharge et charge le modèle (ou le fichier GGUF) sélectionné. Attendez le message « chargé » avant d'envoyer.
   - **Utilisation des Modèles VL** : Si vous sélectionnez un modèle VL (par ex., `LiquidAI/LFM2-VL-3B`), une zone apparaît pour **sélectionner une image**. L'image est envoyée avec votre prochain message.
   - **Éjecter le Modèle** : Libère les ressources VRAM/RAM.
   - **Paramètres** : Température, `min_p` (paramètre officiel LiquidAI, plus `top_p`), pénalité de répétition, longueur max, découpe RAG. Ils sont sauvegardés dans `settings.json`.
@@ -88,7 +90,9 @@ Variables d'environnement optionnelles :
 - `LIQUIDAI_API_KEY` : si défini, les appels doivent envoyer `Authorization: Bearer <clé>`
 - `LIQUIDAI_PRELOAD_MODEL` : précharge un modèle au démarrage (ex. `LiquidAI/LFM2-1.2B`)
 
-Endpoints utiles : `GET /`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/models/unload`.
+Endpoints utiles : `GET /`, `GET /v1/models`, `POST /v1/models/refresh`, `POST /v1/chat/completions`, `POST /v1/models/unload`.
+
+Pour un GGUF précis : `"model": "LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"` (ou le nom de fichier complet). Sinon le quant `Q4_K_M` est choisi automatiquement.
 
 Vous pouvez utiliser `http://127.0.0.1:8000` dans n'importe quel client compatible OpenAI.
 
@@ -161,7 +165,7 @@ curl -X POST "http://127.0.0.1:8000/v1/chat/completions" \
 Les dépendances sont listées dans le fichier `requirements.txt` et sont installées automatiquement. Les principales bibliothèques utilisées sont :
 
 - **GUI** : `PyQt6`
-- **Modèles IA** : `transformers`, `torch`, `accelerate`, `Pillow`
+- **Modèles IA** : `transformers`, `torch`, `accelerate`, `Pillow`, `llama-cpp-python`, `huggingface-hub`
 - **API** : `fastapi`, `uvicorn`
 - **RAG** : `langchain`, `langchain-community`, `sentence-transformers`, `faiss-cpu`, `pypdf`, `python-docx`
 - **Autres** : `markdown2`

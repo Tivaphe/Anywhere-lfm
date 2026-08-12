@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import html
 import json
 import os
@@ -26,16 +28,20 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.catalog import (
+    Catalog,
+    ModelEntry,
+    get_catalog,
+    gguf_quant_label,
+    list_gguf_files,
+    parse_model_ref,
+    pick_gguf_file,
+    refresh_catalog,
+)
 from core.config import load_settings, save_settings
 from core.device import describe_device
 from core.generate import generate
-from core.models import (
-    SUPPORTED_MODELS,
-    LoadedModel,
-    is_vl_model,
-    load_model,
-    unload_model,
-)
+from core.models import LoadedModel, is_gguf_model, is_vl_model, load_model, unload_model
 from core.rag import RagIndex
 from settings import SettingsWindow
 
@@ -129,14 +135,24 @@ class LiquidAIApp(QWidget):
         self.current_assistant_message = ""
         self.selected_image_path = None
         self.busy = False
+        self.catalog = get_catalog(prefer_cache=True)
+        self.catalog_entries: list[ModelEntry] = list(self.catalog.models)
+        self._gguf_fetching: set[str] = set()
 
         self.init_ui()
         self.load_conversations()
         self.check_device()
-        self.refresh_model_list()
+        self.populate_model_selector()
         self.chat_area.append(
-            "<i>Aucun modèle chargé. Choisissez un modèle puis cliquez sur Charger.</i>"
+            "<i>Aucun modèle chargé. Filtrez ou choisissez un modèle puis cliquez sur Charger.</i>"
         )
+        self.chat_area.append(
+            f"<i>Catalogue : {len(self.catalog_entries)} modèles "
+            f"(source : {html.escape(self.catalog.source)}). "
+            "Cliquez sur « Actualiser HF » pour scanner LiquidAI sur Hugging Face.</i>"
+        )
+        if self.catalog.is_stale():
+            self.refresh_huggingface_catalog(silent=True)
         if not self.conversations:
             self.start_new_conversation()
         else:
@@ -168,9 +184,31 @@ class LiquidAIApp(QWidget):
         self.chat_area.setStyleSheet("font-size: 14px; color: #f2f2f2; background-color: #2b2b2b;")
         right_layout.addWidget(self.chat_area)
 
+        filter_layout = QHBoxLayout()
+        self.model_filter = QLineEdit()
+        self.model_filter.setPlaceholderText("Filtrer (ex. 2.5, GGUF, VL, Thinking)...")
+        self.model_filter.textChanged.connect(self.apply_model_filter)
+        self.refresh_hf_button = QPushButton("Actualiser HF")
+        self.refresh_hf_button.setToolTip(
+            "Scanner automatiquement tous les modèles LFM du compte LiquidAI, y compris les fichiers .gguf."
+        )
+        self.refresh_hf_button.clicked.connect(lambda: self.refresh_huggingface_catalog(silent=False))
+        filter_layout.addWidget(self.model_filter)
+        filter_layout.addWidget(self.refresh_hf_button)
+        right_layout.addLayout(filter_layout)
+
         model_controls_layout = QHBoxLayout()
         self.model_selector = QComboBox()
-        self.model_selector.currentTextChanged.connect(self.on_model_change)
+        self.model_selector.setEditable(True)
+        self.model_selector.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.model_selector.setMaxVisibleItems(20)
+        self.model_selector.currentIndexChanged.connect(self.on_model_index_changed)
+        self.gguf_selector = QComboBox()
+        self.gguf_selector.setVisible(False)
+        self.gguf_selector.setMinimumWidth(160)
+        self.gguf_selector.setToolTip("Fichier / quantification GGUF détecté sur le dépôt Hugging Face.")
+        self.gguf_label = QLabel("GGUF:")
+        self.gguf_label.setVisible(False)
         self.load_button = QPushButton("Charger")
         self.load_button.clicked.connect(self.load_selected_model)
         settings_button = QPushButton("Paramètres")
@@ -179,7 +217,9 @@ class LiquidAIApp(QWidget):
         self.eject_button.clicked.connect(self.eject_model)
         self.eject_button.setEnabled(False)
         model_controls_layout.addWidget(QLabel("Modèle:"))
-        model_controls_layout.addWidget(self.model_selector)
+        model_controls_layout.addWidget(self.model_selector, 2)
+        model_controls_layout.addWidget(self.gguf_label)
+        model_controls_layout.addWidget(self.gguf_selector, 1)
         model_controls_layout.addWidget(self.load_button)
         model_controls_layout.addWidget(self.eject_button)
         model_controls_layout.addWidget(settings_button)
@@ -277,12 +317,143 @@ class LiquidAIApp(QWidget):
     def check_device(self):
         self.chat_area.append(f"<i>Utilisation de l'appareil : {html.escape(describe_device())}</i>")
 
-    def refresh_model_list(self):
+    def apply_model_filter(self, _text: str = ""):
+        self.populate_model_selector(keep_selection=True)
+
+    def _matching_entries(self) -> list[ModelEntry]:
+        query = self.model_filter.text().strip().lower()
+        if not query:
+            return list(self.catalog_entries)
+        tokens = query.split()
+        matches = []
+        for entry in self.catalog_entries:
+            haystack = f"{entry.repo_id} {entry.label} {entry.kind}".lower()
+            if all(token in haystack for token in tokens):
+                matches.append(entry)
+        return matches
+
+    def populate_model_selector(self, keep_selection: bool = False):
+        previous = self.current_repo_id() if keep_selection else ""
+        matches = self._matching_entries()
         self.model_selector.blockSignals(True)
         self.model_selector.clear()
-        self.model_selector.addItems(SUPPORTED_MODELS)
+
+        last_kind = None
+        headers = {"text": "── Texte / Instruct ──", "vl": "── Vision ──", "gguf": "── GGUF ──"}
+        for entry in matches:
+            if entry.kind != last_kind:
+                self.model_selector.addItem(headers.get(entry.kind, f"── {entry.kind} ──"))
+                index = self.model_selector.count() - 1
+                self.model_selector.model().item(index).setEnabled(False)
+                last_kind = entry.kind
+            self.model_selector.addItem(entry.label, entry.repo_id)
+
+        selected = False
+        if previous:
+            idx = self.model_selector.findData(previous)
+            if idx >= 0:
+                self.model_selector.setCurrentIndex(idx)
+                selected = True
+        if not selected:
+            for row in range(self.model_selector.count()):
+                if self.model_selector.itemData(row):
+                    self.model_selector.setCurrentIndex(row)
+                    break
         self.model_selector.blockSignals(False)
-        self.on_model_change(self.model_selector.currentText())
+        self.on_model_index_changed(self.model_selector.currentIndex())
+
+    def current_repo_id(self) -> str:
+        data = self.model_selector.currentData()
+        if data:
+            return str(data)
+        text = self.model_selector.currentText().strip()
+        if text.startswith("LiquidAI/"):
+            return parse_model_ref(text)[0]
+        for entry in self.catalog_entries:
+            if entry.label == text or entry.short_name == text:
+                return entry.repo_id
+        return text
+
+    def current_model_ref(self) -> str:
+        repo = self.current_repo_id()
+        if not repo:
+            return ""
+        if self.gguf_selector.isVisible() and self.gguf_selector.currentData():
+            return f"{repo}:{self.gguf_selector.currentData()}"
+        return repo
+
+    def current_entry(self) -> ModelEntry | None:
+        repo = self.current_repo_id()
+        for entry in self.catalog_entries:
+            if entry.repo_id == repo:
+                return entry
+        if repo:
+            kind = "gguf" if is_gguf_model(repo) else "vl" if is_vl_model(repo) else "text"
+            return ModelEntry(repo_id=repo, kind=kind)
+        return None
+
+    def refresh_huggingface_catalog(self, silent: bool = False):
+        if not silent:
+            self.chat_area.append("<i>Actualisation du catalogue depuis Hugging Face...</i>")
+        self.refresh_hf_button.setEnabled(False)
+        self.catalog_worker = CatalogWorker()
+        self.catalog_worker.catalog_ready.connect(self.on_catalog_ready)
+        self.catalog_worker.status_update.connect(self.on_status_update)
+        self.catalog_worker.error.connect(self.on_catalog_error)
+        self.catalog_worker.start()
+
+    def on_catalog_ready(self, catalog: Catalog):
+        self.catalog = catalog
+        self.catalog_entries = list(catalog.models)
+        self.populate_model_selector(keep_selection=True)
+        self.refresh_hf_button.setEnabled(True)
+        gguf_count = sum(1 for entry in catalog.models if entry.kind == "gguf")
+        self.chat_area.append(
+            f"<i>Catalogue Hugging Face prêt : {len(catalog.models)} modèles LFM "
+            f"dont {gguf_count} dépôts GGUF.</i>"
+        )
+
+    def on_catalog_error(self, message: str):
+        self.refresh_hf_button.setEnabled(True)
+        self.on_error(message)
+
+    def populate_gguf_files(self, entry: ModelEntry):
+        self.gguf_selector.blockSignals(True)
+        self.gguf_selector.clear()
+        files = list(entry.gguf_files)
+        if files:
+            preferred = pick_gguf_file(files)
+            for filename in files:
+                self.gguf_selector.addItem(gguf_quant_label(filename), filename)
+            idx = self.gguf_selector.findData(preferred)
+            if idx >= 0:
+                self.gguf_selector.setCurrentIndex(idx)
+        else:
+            self.gguf_selector.addItem("Recherche des fichiers...", None)
+            if entry.repo_id not in self._gguf_fetching:
+                self._gguf_fetching.add(entry.repo_id)
+                self.gguf_files_worker = GgufFilesWorker(entry.repo_id)
+                self.gguf_files_worker.files_ready.connect(self.on_gguf_files_ready)
+                self.gguf_files_worker.error.connect(self.on_status_update)
+                self.gguf_files_worker.start()
+        self.gguf_selector.blockSignals(False)
+
+    def on_gguf_files_ready(self, repo_id: str, files: list):
+        self._gguf_fetching.discard(repo_id)
+        entry = None
+        for item in self.catalog_entries:
+            if item.repo_id == repo_id:
+                item.gguf_files = list(files)
+                entry = item
+                break
+        if self.current_repo_id() != repo_id:
+            return
+        if not files:
+            self.gguf_selector.clear()
+            self.gguf_selector.addItem("Aucun .gguf trouvé", None)
+            return
+        if entry:
+            self.populate_gguf_files(entry)
 
     def open_settings(self):
         dialog = SettingsWindow(self)
@@ -299,21 +470,25 @@ class LiquidAIApp(QWidget):
                     history.insert(0, {"role": "system", "content": self.settings["system_prompt"]})
                 self.display_current_conversation()
 
-    def on_model_change(self, model_identifier: str):
-        if not model_identifier:
+    def on_model_index_changed(self, _index: int = 0):
+        entry = self.current_entry()
+        if entry is None:
+            self.image_input_container.setVisible(False)
+            self.gguf_selector.setVisible(False)
+            self.gguf_label.setVisible(False)
             return
-        vl_selected = is_vl_model(model_identifier)
+        vl_selected = entry.kind == "vl"
+        gguf_selected = entry.kind == "gguf"
         self.image_input_container.setVisible(vl_selected)
+        self.gguf_selector.setVisible(gguf_selected)
+        self.gguf_label.setVisible(gguf_selected)
         if not vl_selected:
             self.clear_image()
-        if self.loaded_model and self.loaded_model.name != model_identifier:
-            self.chat_area.append(
-                f"<i>Modèle sélectionné : {html.escape(model_identifier)}. "
-                "Cliquez sur Charger pour l'utiliser.</i>"
-            )
+        if gguf_selected:
+            self.populate_gguf_files(entry)
 
     def load_selected_model(self):
-        model_identifier = self.model_selector.currentText()
+        model_identifier = self.current_model_ref()
         if not model_identifier:
             return
         if self.loaded_model and self.loaded_model.name == model_identifier:

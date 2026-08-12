@@ -13,9 +13,10 @@ from PIL import Image
 from pydantic import BaseModel
 from transformers.image_utils import load_image
 
+from core.catalog import get_catalog, refresh_catalog
 from core.config import DEFAULT_SETTINGS
 from core.generate import generate
-from core.models import SUPPORTED_MODELS, ModelCache, UnsupportedModelError
+from core.models import ModelCache, UnsupportedModelError, available_model_ids
 
 API_KEY = os.environ.get("LIQUIDAI_API_KEY")
 HOST = os.environ.get("LIQUIDAI_HOST", "127.0.0.1")
@@ -104,6 +105,14 @@ async def verify_api_key(authorization: Optional[str] = Header(default=None)) ->
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    catalog = get_catalog()
+    if catalog.is_stale():
+        print("Actualisation du catalogue LiquidAI depuis Hugging Face...")
+        try:
+            catalog = await asyncio.to_thread(refresh_catalog)
+            print(f"Catalogue : {len(catalog.models)} modèles ({catalog.source}).")
+        except Exception as exc:
+            print(f"AVERTISSEMENT : catalogue HF indisponible ({exc}). Fallback local utilisé.")
     if PRELOAD_MODEL:
         print(f"Préchargement du modèle {PRELOAD_MODEL}...")
         try:
@@ -175,18 +184,39 @@ async def create_chat_completion(
 
 @app.get("/v1/models")
 async def list_models():
+    catalog = get_catalog()
     loaded = set(model_cache.loaded_names())
-    return {
-        "object": "list",
-        "data": [
+    data = []
+    for entry in catalog.models:
+        data.append(
             {
-                "id": name,
+                "id": entry.repo_id,
                 "object": "model",
                 "owned_by": "liquid-ai",
-                "loaded": name in loaded,
+                "kind": entry.kind,
+                "loaded": any(item == entry.repo_id or item.startswith(f"{entry.repo_id}:") for item in loaded),
+                "gguf_files": entry.gguf_files,
             }
-            for name in SUPPORTED_MODELS
-        ],
+        )
+    return {
+        "object": "list",
+        "source": catalog.source,
+        "updated_at": catalog.updated_at,
+        "data": data,
+    }
+
+
+@app.post("/v1/models/refresh")
+async def refresh_models(_: None = Depends(verify_api_key)):
+    try:
+        catalog = await asyncio.to_thread(refresh_catalog)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Catalogue Hugging Face indisponible : {exc}") from exc
+    return {
+        "status": "ok",
+        "source": catalog.source,
+        "count": len(catalog.models),
+        "gguf": sum(1 for entry in catalog.models if entry.kind == "gguf"),
     }
 
 
@@ -203,7 +233,8 @@ def read_root():
         "status": "Le serveur de l'API LiquidAI est en ligne.",
         "bind": f"{HOST}:{PORT}",
         "auth_required": bool(API_KEY),
-        "models_available": SUPPORTED_MODELS,
+        "models_available": available_model_ids(),
+        "catalog_source": get_catalog().source,
         "models_loaded_in_cache": loaded_models or "Aucun",
     }
 

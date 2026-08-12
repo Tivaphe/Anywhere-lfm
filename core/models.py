@@ -8,30 +8,16 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-SUPPORTED_MODELS: List[str] = [
-    # Text
-    "LiquidAI/LFM2-350M",
-    "LiquidAI/LFM2-700M",
-    "LiquidAI/LFM2-1.2B",
-    "LiquidAI/LFM2-8B-A1B",
-    "LiquidAI/LFM2-2.6B",
-    "LiquidAI/LFM2-2.6B-Exp",
-    "LiquidAI/LFM2-1.2B-Extract",
-    "LiquidAI/LFM2-350M-Extract",
-    "LiquidAI/LFM2-1.2B-RAG",
-    "LiquidAI/LFM2-1.2B-Tool",
-    "LiquidAI/LFM2-350M-Math",
-    # Vision-Language
-    "LiquidAI/LFM2-VL-3B",
-    "LiquidAI/LFM2-VL-1.6B",
-    "LiquidAI/LFM2-VL-450M",
-    # GGUF
-    "LiquidAI/LFM2-2.6B-GGUF",
-    "LiquidAI/LFM2-8B-A1B-GGUF",
-    "LiquidAI/LFM2-1.2B-GGUF",
-    "LiquidAI/LFM2-700M-GGUF",
-    "LiquidAI/LFM2-350M-GGUF",
-]
+from .catalog import (
+    fallback_repo_ids,
+    get_cached_repo_ids,
+    is_allowed_model,
+    list_gguf_files,
+    parse_model_ref,
+    pick_gguf_file,
+)
+
+SUPPORTED_MODELS: List[str] = fallback_repo_ids()
 
 StatusCallback = Optional[Callable[[str], None]]
 
@@ -49,11 +35,22 @@ class UnsupportedModelError(ValueError):
 
 
 def is_gguf_model(name: str) -> bool:
-    return "GGUF" in (name or "")
+    repo, spec = parse_model_ref(name)
+    if spec and str(spec).lower().endswith(".gguf"):
+        return True
+    return "GGUF" in (repo or name or "")
 
 
 def is_vl_model(name: str) -> bool:
-    return "VL" in (name or "")
+    if is_gguf_model(name):
+        return False
+    repo, _ = parse_model_ref(name)
+    short = (repo or name or "").split("/", 1)[-1]
+    return "VL" in short
+
+
+def available_model_ids() -> List[str]:
+    return get_cached_repo_ids() or list(SUPPORTED_MODELS)
 
 
 def _emit(callback: StatusCallback, message: str) -> None:
@@ -67,11 +64,18 @@ def load_model(
     offload_folder: str = "./offload",
     allowed_models: Optional[List[str]] = None,
 ) -> LoadedModel:
-    catalog = allowed_models if allowed_models is not None else SUPPORTED_MODELS
-    if catalog and model_name not in catalog:
+    repo_id, _ = parse_model_ref(model_name)
+    if allowed_models is not None:
+        allowed = model_name in allowed_models or repo_id in allowed_models
+        if not allowed:
+            raise UnsupportedModelError(
+                f"Modèle non supporté: {model_name}. "
+                f"Disponibles: {', '.join(allowed_models)}"
+            )
+    elif not is_allowed_model(model_name):
         raise UnsupportedModelError(
             f"Modèle non supporté: {model_name}. "
-            f"Disponibles: {', '.join(catalog)}"
+            "Seuls les dépôts LiquidAI/LFM* (texte, VL, GGUF) sont acceptés."
         )
 
     os.makedirs(offload_folder, exist_ok=True)
@@ -79,27 +83,25 @@ def load_model(
     if is_gguf_model(model_name):
         return _load_gguf(model_name, status_callback)
     if is_vl_model(model_name):
-        return _load_vl(model_name, offload_folder, status_callback)
-    return _load_text(model_name, offload_folder, status_callback)
+        return _load_vl(repo_id, offload_folder, status_callback)
+    return _load_text(repo_id, offload_folder, status_callback)
 
 
 def _load_gguf(model_name: str, status_callback: StatusCallback) -> LoadedModel:
-    from huggingface_hub import hf_hub_download, list_repo_files
+    from huggingface_hub import hf_hub_download
     from llama_cpp import Llama
 
-    _emit(status_callback, "Recherche du fichier GGUF sur le Hugging Face Hub...")
-    repo_files = list_repo_files(model_name)
-    gguf_files = [name for name in repo_files if name.endswith(".gguf")]
+    repo_id, spec = parse_model_ref(model_name)
+    _emit(status_callback, f"Recherche des fichiers GGUF dans {repo_id}...")
+    gguf_files = list_gguf_files(repo_id)
     if not gguf_files:
-        raise FileNotFoundError(f"Aucun fichier GGUF trouvé dans {model_name}")
+        raise FileNotFoundError(f"Aucun fichier GGUF trouvé dans {repo_id}")
 
-    model_file = next(
-        (name for name in gguf_files if "Q4_K_M" in name.upper()),
-        gguf_files[0],
-    )
+    model_file = pick_gguf_file(gguf_files, spec)
+    loaded_name = f"{repo_id}:{os.path.basename(model_file)}"
     _emit(status_callback, f"Téléchargement du modèle GGUF : {model_file}...")
     model_path = hf_hub_download(
-        repo_id=model_name,
+        repo_id=repo_id,
         filename=model_file,
         local_dir=os.path.join(os.getcwd(), "models"),
     )
@@ -110,7 +112,7 @@ def _load_gguf(model_name: str, status_callback: StatusCallback) -> LoadedModel:
         n_gpu_layers=-1,
         verbose=False,
     )
-    return LoadedModel(name=model_name, kind="gguf", model=model, processor=None)
+    return LoadedModel(name=loaded_name, kind="gguf", model=model, processor=None)
 
 
 def _load_vl(model_name: str, offload_folder: str, status_callback: StatusCallback) -> LoadedModel:
@@ -177,10 +179,10 @@ class ModelCache:
         with self._lock:
             if model_name in self._models:
                 return self._models[model_name]
-            if model_name not in SUPPORTED_MODELS:
+            if not is_allowed_model(model_name):
                 raise UnsupportedModelError(
                     f"Modèle non supporté: {model_name}. "
-                    f"Disponibles: {', '.join(SUPPORTED_MODELS)}"
+                    "Seuls les dépôts LiquidAI/LFM* sont acceptés."
                 )
             for name in list(self._models):
                 unload_model(self._models.pop(name))
