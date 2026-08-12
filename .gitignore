@@ -1,11 +1,16 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# App data
+documents/
+conversations/
+models/
+offload/
+settings.json
 
 # Logs
 *.log
-
-# Documents
-documents/
